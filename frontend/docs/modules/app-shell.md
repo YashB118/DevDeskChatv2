@@ -2,7 +2,7 @@
 
 > The boot orchestration layer. Owns the React tree's root, the providers composition, the top-level error boundary, the loading gate, and the dev-only styleguide screen.
 
-**Status:** Phase 2 — `ThemeProvider` and `ToastProvider` are now real implementations from the design system. The other four root providers remain transparent passthroughs until their respective phases. A dev-only `/__styleguide` path renders the design-system surface. Full routing arrives in Phase 4.
+**Status:** Phase 3 — `ThemeProvider`, `ToastProvider`, and now `AuthProvider` are real. The remaining three root providers stay transparent passthroughs until their respective phases. A dev-only `/__styleguide` path renders the design-system surface. Full routing arrives in Phase 4.
 
 ---
 
@@ -18,7 +18,7 @@ The shell is also the single place where unhandled errors are caught before they
 |---|---|
 | `frontend/src/main.tsx` | Entry. Mounts `<StrictMode><App /></StrictMode>` into `#root`. Throws if `#root` is missing. Imports `@/styles/globals.css` so Tailwind + tokens + reset apply before first paint. |
 | `frontend/src/App.tsx` | Composes `AppErrorBoundary → AppProviders → (BootGate ∣ Styleguide)`. The styleguide branch only renders when `import.meta.env.DEV` AND `window.location.pathname === '/__styleguide'`. |
-| `frontend/src/app/providers/AppProviders.tsx` | Composes the six root providers in fixed order. `ThemeProvider` and `ToastProvider` are imported from `@/design-system`; the other four are local passthrough placeholders awaiting their phases. |
+| `frontend/src/app/providers/AppProviders.tsx` | Composes the six root providers in fixed order. `ThemeProvider` + `ToastProvider` from `@/design-system`; `AuthProvider` from `@/features/auth` (Phase 3); `QueryProvider`, `SocketProvider`, `SyncController` remain local passthrough placeholders awaiting their phases. |
 | `frontend/src/app/errors/AppErrorBoundary.tsx` | Class component, top-level error boundary. Renders a fallback and dispatches a `window` event for telemetry. |
 | `frontend/src/app/ui/BootGate.tsx` | Loading indicator shown until features mount real content. `role="status"`, `aria-live="polite"`. |
 | `frontend/src/app/ui/Styleguide.tsx` | Dev-only visual smoke screen: renders every primitive + compound, plus a theme toggle that calls `setPreference()`. Replaced by `<AppRouter>` in Phase 4 (the page becomes a real route). |
@@ -31,14 +31,17 @@ The router subdirectory (`frontend/src/app/router/`) exists as empty folders; po
 
 1. **QueryProvider** — TanStack Query client. Innermost children must be able to call hooks like `useQuery`. ⏳ Phase 6 replaces placeholder.
 2. **ThemeProvider** — applies `data-theme` on `<html>` and provides theme context via `useTheme()`. ✅ Phase 2.
-3. **AuthProvider** — bootstraps a silent refresh on mount, exposes `useAuth()`, emits `auth:ready` / `auth:logged-out` on the event bus. ⏳ Phase 3.
+3. **AuthProvider** — registers the HTTP layer's refresh handler with `lib/http/retry`, runs a silent refresh on mount (`POST /api/auth/refresh` → `GET /api/auth/me`), emits `auth:ready` on success and `auth:logged-out` on refresh failure. Public hook surface is `useAuth()` from `@/features/auth`. ✅ Phase 3.
 4. **SocketProvider** — waits for `auth:ready`, opens the Socket.IO singleton, exposes connection status. ⏳ Phase 5.
 5. **SyncController** — renderless. Registers per-feature socket → cache handlers. ⏳ Phase 5.
 6. **ToastProvider** — Radix Toast viewport + `useToast()` context. ✅ Phase 2.
 
-Children of `ToastProvider` render once everything above is ready. After Phase 2 the child is either `<BootGate>` (default) or `<Styleguide>` (when the URL is `/__styleguide` in dev). From Phase 4 onward this child becomes `<AppRouter>`.
+Children of `ToastProvider` render once everything above is ready. After Phase 3 the child is still either `<BootGate>` (default) or `<Styleguide>` (when the URL is `/__styleguide` in dev). From Phase 4 onward this child becomes `<AppRouter>`.
 
-**Do not reorder these providers without updating this contract.** Reordering breaks downstream assumptions (e.g. `SocketProvider` requires `AuthProvider` to have emitted `auth:ready`; `ToastProvider` reads `ThemeProvider`'s tokens via CSS variables).
+**Do not reorder these providers without updating this contract.** Reordering breaks downstream assumptions:
+- `AuthProvider` must come before `SocketProvider` because the socket waits for `auth:ready`.
+- `AuthProvider` must come after `QueryProvider` (Phase 6) once mutations move into TanStack Query — `useAuth().login` will become a mutation and needs the query client.
+- `ToastProvider` reads `ThemeProvider`'s tokens via CSS variables.
 
 ## ThemeProvider integration
 
@@ -86,7 +89,7 @@ Gating:
 
 It uses a path string check, not React Router, because the router lands in Phase 4. When the router arrives, the styleguide will move into the route table behind the same dev guard.
 
-## React tree (current state, Phase 2)
+## React tree (current state, Phase 3)
 
 ```
 <head>
@@ -98,7 +101,7 @@ It uses a path string check, not React Router, because the router lands in Phase
          └─ <AppProviders>
             ├─ <QueryProvider>           // placeholder
             ├─ <ThemeProvider>           // ✅ Phase 2
-            │   ├─ <AuthProvider>        // placeholder
+            │   ├─ <AuthProvider>        // ✅ Phase 3 (from @/features/auth)
             │   │   ├─ <SocketProvider>  // placeholder
             │   │   │   ├─ <SyncController>  // placeholder
             │   │   │   │   └─ <ToastProvider>  // ✅ Phase 2 (Radix Toast viewport)
@@ -141,11 +144,13 @@ When replacing a placeholder provider with a real implementation in a later phas
 
 - `main.tsx` is the entry — Vite's `index.html` points at it. `index.html` also loads `/theme-bootstrap.js` before the module script.
 - `App.tsx` is imported only by `main.tsx`.
-- `AppProviders` now imports `ThemeProvider` and `ToastProvider` from `@/design-system`; the other providers, error boundary, BootGate, and Styleguide are only imported by `App.tsx`. Later phases may import `BootGate` from `<Suspense>` fallbacks in `app/router/`.
+- `AppProviders` imports `ThemeProvider` and `ToastProvider` from `@/design-system`, and `AuthProvider` from `@/features/auth` (Phase 3). The remaining provider placeholders, error boundary, BootGate, and Styleguide are only imported by `App.tsx`. Later phases may import `BootGate` from `<Suspense>` fallbacks in `app/router/`.
 
 ## References
 
 - Architectural rationale: [`FRONTEND_ARCHITECTURE.md`](../../../FRONTEND_ARCHITECTURE.md) §4 (boot sequence), §4.1 (detailed flow), §7.2 (theme switching).
-- Implementation phases: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../../FRONTEND_IMPLEMENTATION_PLAN.md) Phases 1–2.
+- Implementation phases: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../../FRONTEND_IMPLEMENTATION_PLAN.md) Phases 1–3.
 - Design system surface: [`design-system.md`](design-system.md).
+- Auth feature surface: [`auth.md`](auth.md).
+- HTTP layer surface: [`http.md`](http.md).
 - Master context: [`../context.md`](../context.md).

@@ -34,6 +34,8 @@ describe('Liveness + correlation + 404 envelope (no infra)', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL ??= 'postgres://user:pass@localhost:5432/devdesk';
     process.env.REDIS_URL ??= 'redis://localhost:6379';
+    process.env.JWT_PRIVATE_KEY ??= '-----BEGIN PRIVATE KEY-----\nstub\n-----END PRIVATE KEY-----';
+    process.env.JWT_PUBLIC_KEY ??= '-----BEGIN PUBLIC KEY-----\nstub\n-----END PUBLIC KEY-----';
     const mod = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
     app = mod.createNestApplication();
     app.useGlobalFilters(new AllExceptionsFilter());

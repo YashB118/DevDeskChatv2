@@ -117,7 +117,7 @@ main.tsx
                  └─ <AppProviders>
                       ├─ <QueryProvider>       # TanStack Query client placeholder (Phase 6)
                       ├─ <ThemeProvider>       # ✅ Phase 2 — applies data-theme, listens to OS color scheme
-                      ├─ <AuthProvider>        # silent refresh placeholder (Phase 3)
+                      ├─ <AuthProvider>        # ✅ Phase 3 — registers refresh handler, runs silent refresh on mount, emits auth:ready / auth:logged-out
                       ├─ <SocketProvider>      # opens socket AFTER auth:ready (Phase 5)
                       ├─ <SyncController>      # registers per-feature sync handlers (Phase 5)
                       └─ <ToastProvider>       # ✅ Phase 2 — Radix Toast viewport + useToast() context
@@ -160,12 +160,14 @@ The backend (`../../backend/`) is the single API + WebSocket host. Authoritative
 | Backend CORS allow-list (dev default) | `http://localhost:5173` |
 | `VITE_API_BASE_URL` (dev) | `http://localhost:3005` |
 | `VITE_SOCKET_URL` (dev) | `http://localhost:3005` |
-| Error envelope | `{ error: { code, message, correlationId, details? } }` — frontend's `AppApiError` (Phase 3) decodes exactly this shape |
+| Error envelope | `{ error: { code, message, correlationId, details? } }` — frontend's `AppApiError.fromAxios` (Phase 3 ✅) decodes exactly this shape |
 | Correlation header | `X-Correlation-Id` (case-insensitive); backend echoes a valid UUID or generates one. Clients must read the echoed value |
-| Cookies | `credentials: true` CORS both sides; refresh cookie is httpOnly (Phase 3). Frontend never reads cookies from JS |
+| Cookies | `credentials: true` CORS both sides; refresh cookie is httpOnly. Frontend axios uses `withCredentials: true` (Phase 3 ✅) and never reads cookies from JS |
 | Health probes | `GET /health/live` (cheap), `GET /health/ready` (terminus DB+Redis) — do not call from the UI on every render |
 
 Endpoints the frontend's later phases assume (auth, chats, messages, sessions, sync) are not yet implemented on the backend. They land in backend phases 3+. The phase-ordered gap is expected; each frontend feature blocks behind its own phase boundary until the matching backend endpoint exists.
+
+The Phase 3 frontend auth code is wired to the canonical contract — `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/auth/me`, `PATCH /api/auth/password` — and unit-tests itself against MSW handlers that mirror that contract. Once the matching backend lands, no frontend changes should be required.
 
 Backend invariants the frontend depends on:
 - Envelope shape + `code` constants stay stable.
@@ -179,7 +181,7 @@ Backend invariants the frontend depends on:
 |---|---|---|
 | **1** | Foundation: project scaffold, providers shell, typing, env | ✅ Done |
 | **2** | Design system | ✅ Done |
-| **3** | HTTP + auth | ⏳ Pending |
+| **3** | HTTP + auth | ✅ Done |
 | **4** | Routing + guards | ⏳ Pending |
 | **5** | Real-time core | ⏳ Pending |
 | **6** | State foundation | ⏳ Pending |
@@ -194,7 +196,7 @@ Detailed plan for every phase: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../FRONTEN
 Architectural reference: [`FRONTEND_ARCHITECTURE.md`](../../FRONTEND_ARCHITECTURE.md).
 Feature catalog: [`FRONTEND_FEATURES_OVERVIEW.md`](../../FRONTEND_FEATURES_OVERVIEW.md).
 
-## 11. Current build state (after Phase 2)
+## 11. Current build state (after Phase 3)
 
 What exists and runs today:
 
@@ -226,8 +228,32 @@ What exists and runs today:
   - `tokens/contrast.test.ts` parses each theme CSS file and asserts WCAG AA contrast (4.5:1, or 3:1 for `fg-muted`) for seven fg/bg pairs across all three themes — 21 assertions total.
 - **Test setup** — `src/tests/setup.ts` extends `expect` with `vitest-axe` matchers and stubs `window.matchMedia` for jsdom. `src/tests/vitest-axe.d.ts` augments Vitest's `Assertion` interface.
 
-### Known deviations (Phase 2)
-- Initial JS bundle is 386.64 KB raw / 112.52 KB gzipped — over the `FRONTEND_ARCHITECTURE.md §17` target of 250 KB initial JS. Admin/feature code-splitting lands in Phase 4 (router) and Phase 9 (admin chunk); the budget assertion in CI is wired in Phase 11.
+### From Phase 3 (HTTP + auth)
+- **HTTP client** — `lib/http/client.ts` is a singleton axios instance. `withCredentials: true`, 15 s timeout, `Content-Type: application/json` default. Request interceptor attaches the in-memory bearer token; response interceptor translates errors to `AppApiError` and runs the silent-refresh + retry once on 401.
+- **Refresh queue** — `lib/http/retry.ts` exposes `registerRefreshHandler(fn)` / `refreshAccessToken()`. Concurrent 401s coalesce behind a single in-flight `Promise<string>`; on rejection the slot clears so the next attempt is a fresh refresh. `_resetRefreshState()` exists for tests.
+- **Error envelope** — `lib/http/errors.ts` defines `AppApiError` with `code / message / status / correlationId / details`. `AppApiError.fromAxios(err)` parses the backend's `{ error: { code, message, correlationId, details? } }` envelope, falls back to `UNKNOWN_ERROR` on missing envelope, and uses `NETWORK_ERROR` when there's no response. Reads `x-correlation-id` from response headers when the envelope omits it.
+- **In-memory token store** — `lib/storage/memory.ts` exports `get/set/clearAccessToken()`. Closure-backed; never touches `localStorage` / `sessionStorage`.
+- **Event bus** — `realtime/eventBus.ts` is a typed `mitt`-backed emitter for `auth:ready` / `auth:logged-out` / `sync:resume` / `app:error`. First piece of `realtime/` to land; the rest follows in Phase 5.
+- **Auth feature** — `features/auth/`:
+  - `api/auth.api.ts` — Zod-validated `login` / `refresh` / `logout` / `me` / `changePassword`. Refresh/login/logout all pass `_skipAuthRefresh: true` so the response interceptor never tries to re-refresh on a refresh failure.
+  - `store/auth.store.ts` — module-singleton state (`status: 'initializing' | 'authenticated' | 'unauthenticated'`, `user`, `error`) exposed via `useSyncExternalStore`. No Zustand yet (Phase 6); the store is small and self-contained.
+  - `hooks/useAuth.ts` — public hook with `{ status, user, error, isAuthenticated, login, logout, changePassword }`.
+  - `hooks/useBootstrapAuth.ts` — runs `refresh` → `me` once on mount; emits `auth:ready` on success.
+  - `components/AuthProvider.tsx` — registers the refresh handler with the HTTP retry layer on mount, runs `useBootstrapAuth`, emits `auth:logged-out` on refresh failure. Imported by `AppProviders` (replaces the Phase 1 placeholder).
+  - `components/LoginForm.tsx`, `PasswordChangeForm.tsx`, `LogoutButton.tsx` — React Hook Form + `zodResolver`; field-level error mapping for `INVALID_CREDENTIALS` / `USER_DISABLED` / `RATE_LIMITED`; submit guarded by `isSubmitting`.
+  - `index.ts` is the only cross-feature entry — exports `useAuth`, `AuthProvider`, the three components, and the public types.
+- **Test scaffolding** — `src/tests/mocks/server.ts` sets up an MSW node server; per-test files call `server.listen() / resetHandlers() / close()`. The Phase 3 suites that use MSW: `lib/http/client.test.ts`, `features/auth/components/LoginForm.test.tsx`.
+- **Tests** — 62 pass total (Phase 1 + 2 + 20 new from Phase 3):
+  - Refresh-queue concurrency (`lib/http/retry.test.ts`).
+  - `AppApiError.fromAxios` envelope + fallback + correlation-header (`lib/http/errors.test.ts`).
+  - Access-token memory storage round-trip + non-leak to `localStorage` (`lib/storage/memory.test.ts`).
+  - MSW silent refresh end-to-end: token attach, single-coalesce of parallel 401s, non-401 mapping to `AppApiError`, refresh-failure surfaces original 401 (`lib/http/client.test.ts`).
+  - Login form validation, happy-path token store + `onSuccess` callback, `INVALID_CREDENTIALS` field error (`features/auth/components/LoginForm.test.tsx`).
+
+### Known deviations (Phase 3)
+- Initial JS bundle is now 487.11 KB raw / 143.02 KB gzipped — Phase 2's 387 KB plus axios + react-hook-form + zodResolver + mitt. Still over the `FRONTEND_ARCHITECTURE.md §17` target of 250 KB initial JS. Admin/feature code-splitting lands in Phase 4 (router) and Phase 9 (admin chunk); the budget assertion in CI is wired in Phase 11.
+- Login redirect / dashboard route does not exist yet — `LoginForm` accepts an `onSuccess` callback for the eventual router integration in Phase 4.
+- No backend endpoints exist yet — auth code is contract-tested against MSW handlers that mirror the canonical envelope.
 - CSP still allows `style-src 'unsafe-inline'`; tightened in Phase 11 alongside SHA-pinning for the theme bootstrap.
 - Chromatic visual regression / per-story axe sweep deferred to Phase 12.
 

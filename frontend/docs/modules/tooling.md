@@ -2,7 +2,7 @@
 
 > The build, lint, type, test, and CI configuration. Not a feature module — described here so an AI editing config can understand the constraints these tools enforce on the rest of the codebase.
 
-**Status:** Phase 2 — toolchain now covers Tailwind v4 (via `@tailwindcss/vite`), Storybook 8 (`@storybook/react-vite` + `@storybook/addon-a11y`), and `vitest-axe` matchers. Remaining work: Chromatic + Playwright + Lighthouse (Phase 12) and a bundle-budget plugin (Phase 11).
+**Status:** Phase 3 — toolchain adds runtime deps for the HTTP + auth layer (axios, react-hook-form, `@hookform/resolvers`, mitt) and the MSW node server for integration tests. Remaining toolchain work: Chromatic + Playwright + Lighthouse (Phase 12), bundle-budget plugin (Phase 11).
 
 ---
 
@@ -21,6 +21,7 @@
 | `frontend/.env.example` | Documents the required `VITE_*` keys. |
 | `frontend/src/vite-env.d.ts` | Vite client types. |
 | `frontend/src/tests/setup.ts` | Vitest setup — jest-dom + `vitest-axe` matchers, `matchMedia` jsdom stub, `cleanup()` afterEach. |
+| `frontend/src/tests/mocks/server.ts` | MSW node `setupServer()` used by HTTP / auth integration tests. Test files call `listen() / resetHandlers() / close()` themselves. |
 | `frontend/src/tests/vitest-axe.d.ts` | Augments Vitest's `Assertion` interface with the axe matchers. |
 | `frontend/.storybook/main.ts` | Storybook config — stories glob, addons (`essentials`, `a11y`), `react-vite` framework, `docs.autodocs: 'tag'`. |
 | `frontend/.storybook/preview.ts` | Storybook preview — imports global CSS, defines the theme toolbar global, applies `data-theme` per story. |
@@ -91,7 +92,7 @@ The ignore list explicitly excludes `dist`, `node_modules`, `coverage`, `.husky`
 
 A bundle-budget plugin is referenced in Phase 1's plan but actually wired in Phase 11.
 
-Current production bundle (post Phase 2): 386.64 KB JS / 112.52 KB gzipped — above the 250 KB target. Pulled under budget once admin code-splitting (Phase 4 router + Phase 9 admin chunk) lands.
+Current production bundle (post Phase 3): 487.11 KB JS / 143.02 KB gzipped — Phase 2's 387 KB plus axios + react-hook-form + zodResolver + mitt. Above the 250 KB target. Pulled under budget once admin code-splitting (Phase 4 router + Phase 9 admin chunk) lands.
 
 ## Vitest configuration
 
@@ -101,6 +102,12 @@ Current production bundle (post Phase 2): 386.64 KB JS / 112.52 KB gzipped — a
 - `test.env` block provides the `VITE_*` values that `lib/env.ts` requires for its eager parse.
 
 `vitest-axe`'s shipped `extend-expect` entrypoint is empty in the installed version, so we register the matchers manually in `setup.ts`. Type augmentation lives in `src/tests/vitest-axe.d.ts` (declares the matcher methods on Vitest's `Assertion` interface).
+
+### MSW conventions (Phase 3)
+
+`src/tests/mocks/server.ts` exports a single `setupServer()` instance. Tests that need it own their lifecycle locally — `beforeAll(() => { server.listen({ onUnhandledRequest: 'error' }); })`, `afterEach(() => { server.resetHandlers(); /* + clear app singletons */ })`, `afterAll(() => { server.close(); })`. Unmocked requests fail the test loudly, which is what we want.
+
+We did not move the lifecycle into the global `setup.ts` because most tests don't need MSW and starting/stopping the interceptor adds setup cost.
 
 The Vitest config and Vite config are separate files because Vitest 3 ships its own internal Vite types and merging the two in one file causes type conflicts with `exactOptionalPropertyTypes: true`.
 
@@ -145,7 +152,7 @@ The Husky pre-commit hook file is not committed yet. To enable hooks locally, ru
 
 ## Known deviations from the architecture doc
 
-- **Bundle size**: Phase 1 floor was ~61 KB gzipped; post Phase 2 the production bundle is 386.64 KB raw / 112.52 KB gzipped — over the 250 KB initial-JS target from `FRONTEND_ARCHITECTURE.md §17`. Driven by Radix primitives, Framer Motion, and the curated `lucide-react` set. Code-splitting in Phase 4 (router) and Phase 9 (admin chunk) pulls this under budget; budget assertion lands in Phase 11.
+- **Bundle size**: Phase 1 floor was ~61 KB gzipped; post Phase 3 the production bundle is 487.11 KB raw / 143.02 KB gzipped — over the 250 KB initial-JS target from `FRONTEND_ARCHITECTURE.md §17`. Driven by Radix primitives, Framer Motion, `lucide-react`, and the Phase 3 HTTP/auth stack (axios, react-hook-form, zodResolver, mitt). Code-splitting in Phase 4 (router) and Phase 9 (admin chunk) pulls this under budget; budget assertion lands in Phase 11.
 - **`eslint.config.ts` (TS) vs `eslint.config.js` (JS)**: Plan suggested a TS config file. We ship `.js` to avoid the jiti/native-TS loader friction in ESLint 9. Functionality is identical.
 - **Bundle-budget Vite plugin**: Referenced in Phase 1 plan, actually implemented in Phase 11.
 - **Husky pre-commit hook**: Config in `package.json` but the hook file is not committed; contributors enable it locally.

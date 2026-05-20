@@ -8,13 +8,13 @@
 
 DevChatDesk's backend is the single server that fronts a multi-tenant team WhatsApp inbox. It owns:
 
-- Authentication, authorization, audit (planned).
+- Authentication, authorization, audit (✅ Phase 3).
 - Real-time fan-out to operator clients (planned).
 - Conversation, message, and assignment state (planned).
 - Background processing of WAHA webhooks (planned).
 - A read-only view of the WAHA NOWEB SQLite store (planned).
 
-Today the codebase has completed **Phase 1 — Foundation** and **Phase 2 — Persistence Layer** of `BACKEND_IMPLEMENTATION_PLAN.md`. No business logic exists yet. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, and returns a normalized error envelope for any unhandled path.
+Today the codebase has completed **Phase 1 — Foundation**, **Phase 2 — Persistence Layer**, and **Phase 3 — Authentication** of `BACKEND_IMPLEMENTATION_PLAN.md`. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, signs RS256 JWTs, rotates opaque refresh tokens with family-scoped reuse detection, writes append-only audit entries, and returns a normalized error envelope for any unhandled path. All non-health HTTP routes sit under the `/api` global prefix.
 
 ## 2. Tech baseline
 
@@ -30,6 +30,7 @@ Today the codebase has completed **Phase 1 — Foundation** and **Phase 2 — Pe
 | Migrations | TypeORM CLI; `synchronize: false` enforced in every env |
 | Cache / coordination | Redis via `ioredis`; namespaced keys; `SET NX PX` distributed lock |
 | Health | `@nestjs/terminus` indicators for Postgres + Redis |
+| Auth | `@nestjs/jwt` (RS256 access tokens) + opaque refresh tokens, bcrypt cost 12, cookie via `cookie-parser` |
 | Testing | Vitest + `@nestjs/testing` + Supertest |
 | Lint / format | ESLint (`strict-type-checked` + `stylistic-type-checked`) + Prettier |
 | CI | GitHub Actions (lint → typecheck → test → build) |
@@ -40,16 +41,19 @@ Today the codebase has completed **Phase 1 — Foundation** and **Phase 2 — Pe
 ```
 backend/
 ├── src/
-│   ├── main.ts                       Bootstrap: NestFactory, helmet, CORS, body-parser, global filter, shutdown hooks.
-│   ├── app.module.ts                 Composition root: Config + Logger + Database + Cache + Health + TransactionRunner provider.
+│   ├── main.ts                       Bootstrap: NestFactory, helmet, CORS, cookie-parser, body-parser, /api prefix, global filter, shutdown hooks.
+│   ├── app.module.ts                 Composition root: Config + Logger + Database + Cache + Health + Users + Auth + TransactionRunner provider.
 │   ├── config/                       Env parsing (Zod) + ConfigModule + LoggerModule + DI constants.
-│   ├── common/                       Cross-cutting: middleware, filters, pipes, decorators.
+│   ├── common/                       Cross-cutting: middleware, filters, pipes, decorators, guards (JwtAuthGuard, AdminGuard).
 │   ├── shared/                       Framework-agnostic: errors, branded ID types, Result helper, Express type augmentation.
+│   ├── modules/
+│   │   ├── users/                    UsersModule: User entity + UserRepository (camelCase ↔ snake_case via naming strategy).
+│   │   └── auth/                     AuthModule: login/refresh/logout/password-change, RS256 JWT, refresh rotation + family revocation, audit_log writes.
 │   └── infra/
 │       ├── db/                       DatabaseModule, standalone CLI DataSource, SnakeNamingStrategy, withTransaction, migrations/.
 │       ├── cache/                    CacheModule, ioredis provider, CacheService, DistributedLockService.
 │       └── health/                   HealthModule (/health/live, /health/ready via terminus DB + Redis probes).
-├── scripts/                          One-shot CLI entry points (migrate, migrate-revert).
+├── scripts/                          One-shot CLI entry points (migrate, migrate-revert, seed).
 ├── test/                             Black-box integration tests against Nest applications.
 ├── docs/                             This documentation tree.
 ├── package.json                      Scripts + dependencies.
@@ -67,16 +71,17 @@ The project lives in a subdirectory under the repo root; the GitHub Actions work
 
 ## 4. Composition root
 
-`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, then `HealthModule`. It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet (they arrive with Phase 3+).
+`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, then `AuthModule`. It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet — auth is enforced per-controller via `@UseGuards(JwtAuthGuard)` with a `@Public()` opt-out for the login/refresh endpoints (the `@Public()` metadata is honoured by `JwtAuthGuard` itself).
 
 `main.ts` is the only place the global exception filter is registered (`app.useGlobalFilters(new AllExceptionsFilter())`). It also:
 
 - Calls `app.useLogger(app.get(Logger))` so Nest's internal logs flow through Pino.
 - Disables `x-powered-by`.
 - Conditionally enables `trust proxy` from env.
-- Mounts `helmet()`.
+- Mounts `helmet()` then `cookieParser()` (cookie-parser must run before any handler reads `req.cookies` — the auth controller depends on it for the refresh cookie).
 - Configures CORS from `CORS_ORIGINS` (wildcard becomes `origin: true`, otherwise a string array; `credentials: true`).
 - Sets body-parser JSON + urlencoded limits from `BODY_LIMIT`.
+- Calls `app.setGlobalPrefix('api', { exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }] })` so every business route lives under `/api/...` while `/health/live` and `/health/ready` stay at the root (orchestrator probes assume the bare path).
 - Calls `app.enableShutdownHooks()` so the `CacheModule.OnApplicationShutdown` and Nest's TypeORM lifecycle close connections cleanly on SIGTERM.
 - Installs process-level `unhandledRejection` / `uncaughtException` handlers that log and exit 1.
 
@@ -88,7 +93,7 @@ The Zod pipe is **not** registered globally. The plan dictates it is applied per
 HTTP request
     │
     ▼
-helmet → CORS → body parser (express layer set up in main.ts)
+helmet → cookie-parser → CORS → body parser (express layer set up in main.ts)
     │
     ▼
 pino-http (from nestjs-pino) — attaches req.log
@@ -101,7 +106,16 @@ CorrelationMiddleware
     • rewraps req.log with a child carrying { correlationId }
     │
     ▼
-Controller (today: only HealthController)
+Route resolution (under /api unless /health/* — see global prefix)
+    │
+    ▼
+JwtAuthGuard (per-controller via @UseGuards)
+    • short-circuits on @Public() metadata
+    • else reads Authorization: Bearer …, verifies RS256
+    • populates req.user = { id, email, role }
+    │
+    ▼
+Controller (HealthController, AuthController)
     │
     ▼ on throw
 AllExceptionsFilter
@@ -146,7 +160,7 @@ Stack traces never leave the server. Detail keys are stable enough for clients t
 
 Env is the only configuration input. It is parsed exactly once by `loadEnv` in `src/config/env.ts` at boot. Failure produces a multi-line summary written to stderr and an `Error` thrown out of the `ConfigModule` factory — Nest aborts startup before HTTP listens. Downstream code never reads `process.env` directly; everything injects `APP_CONFIG`.
 
-Phase 2 added `DATABASE_URL`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_IDLE_IN_TX_TIMEOUT_MS`, `PG_SSL`, `REDIS_URL`, and `REDIS_KEY_PREFIX` to the schema. See [modules/config.md](modules/config.md) for the full schema and behaviour.
+Phase 2 added `DATABASE_URL`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_IDLE_IN_TX_TIMEOUT_MS`, `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED`, `PG_SSL_CA`, `REDIS_URL`, and `REDIS_KEY_PREFIX` to the schema. Phase 3 added the auth surface: `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `JWT_ACCESS_TTL_SECONDS`, `JWT_ISSUER`, `JWT_AUDIENCE`, `REFRESH_TTL_DAYS`, `REFRESH_COOKIE_NAME`, `REFRESH_COOKIE_PATH`, `REFRESH_COOKIE_SECURE`, `REFRESH_COOKIE_DOMAIN`, `BCRYPT_COST`. PEM keys accept literal `\n` escapes and are normalized to real newlines by the loader. See [modules/config.md](modules/config.md) for the full schema and behaviour.
 
 ## 8. Observability baseline
 
@@ -161,21 +175,29 @@ The redact list (see `src/config/constants.ts`) covers `authorization`, `cookie`
 - Body parser limit (default 2MB) keeps oversized payloads from reaching controllers.
 - `x-powered-by` removed.
 - Process-level uncaught error handlers exit non-zero so an orchestrator can restart.
-- `DATABASE_URL` / `REDIS_URL` only from env; never echoed.
+- `DATABASE_URL` / `REDIS_URL` / `JWT_PRIVATE_KEY` only from env; never echoed (PEM keys are redacted via `*.password`/`*.token` paths in the pino redact list, plus the generic `authorization`/`cookie` rules — see `src/config/constants.ts`).
 - Postgres `statement_timeout` (default 5s) and `idle_in_transaction_session_timeout` (default 30s) enforced server-side via the connection pool's `extra` options.
-- TLS to Postgres in production (`PG_SSL=true` → `ssl: { rejectUnauthorized: true }`).
+- TLS to Postgres in production (`PG_SSL=true` → `ssl: { rejectUnauthorized: true }`, optionally pinned via `PG_SSL_CA`).
 - Redis distributed lock uses `SET NX PX` with a random per-acquire token; release uses an `EVAL` Lua script so a holder can only release its own token (and `EXTEND` only refreshes the holder's own lock).
-- No authentication or rate limiting yet — both planned in later phases.
+- **Auth (Phase 3):**
+  - Access tokens are **RS256 JWTs** signed/verified via `@nestjs/jwt`. TTL defaults to 15 minutes. Issuer + audience are pinned via `JWT_ISSUER` / `JWT_AUDIENCE`.
+  - Refresh tokens are **opaque** (`<uuid>.<base64url-secret>`). Only the `bcrypt(secret)` hash is stored; the id half is used to look the candidate up in O(1) before a constant-time bcrypt compare.
+  - Refresh tokens **rotate on every use**; the old row is flipped `revoked = true` with `replaced_by = <new>` inside a single `withTransaction`. Replay of an already-revoked token, or a wrong secret on a known id, **invalidates the entire token family** (`UPDATE refresh_tokens SET revoked = true WHERE family_id = ?`).
+  - Passwords hash with **bcrypt cost 12** (configurable via `BCRYPT_COST`). A dummy hash is also compared on "user not found" to keep timing roughly equivalent to "wrong password".
+  - Refresh cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/api/auth` (`Secure` configurable via `REFRESH_COOKIE_SECURE` for local plain-HTTP dev only).
+  - Append-only `audit_log` writes for `auth.login.success`, `auth.login.failure`, `auth.refresh.success`, `auth.refresh.reuse`, `auth.refresh.invalid`, `auth.logout`, `auth.password.change`. The table is range-partitioned monthly by `created_at`; `ensure_audit_log_partition(date)` materializes future partitions.
+  - `JwtAuthGuard` enforces auth per-controller via `@UseGuards`. `@Public()` opts a handler out (used on `POST /api/auth/login` and `POST /api/auth/refresh`). `AdminGuard` (paired with optional `@Roles(...)`) restricts admin-only routes.
+- No rate limiting yet — planned in Phase 11.
 
 ## 10. Testing baseline
 
-Vitest runs three groups today:
+Vitest runs three groups today (85 tests, all green):
 
-1. **Unit** — env parsing, exception filter mapping, correlation middleware behaviour, snake-case helper, `SnakeNamingStrategy` hooks, `withTransaction` commit/rollback/isolation, `CacheService.wrap` (hit, miss, error path, lock contention fallback), `DistributedLockService` (acquire, retry, release, expired release).
-2. **Integration** (`test/health.e2e-spec.ts`) — boots a minimal Nest application that mounts `ConfigModule`, `LoggerModule`, `CorrelationMiddleware`, and a stand-alone liveness controller; exercises the live probe + 404 envelope without requiring real Postgres / Redis. End-to-end integration against the full `AppModule` (which boots TypeORM + ioredis) lands alongside the first domain module in Phase 3 once there is real schema to exercise.
+1. **Unit** — env parsing (including PEM `\n` normalization), exception filter mapping, correlation middleware behaviour, snake-case helper, `SnakeNamingStrategy` hooks, `withTransaction` commit/rollback/isolation, `CacheService.wrap` (hit, miss, error path, lock contention fallback), `DistributedLockService` (acquire, retry, release, expired release), `AuthService` (login happy + bad-email + wrong-password + disabled, refresh rotation, family revocation on revoked-replay AND wrong-secret-on-known-id, expired-token rejection, change-password revokes all families, logout family revoke, `parseRefreshToken` malformed input), `JwtAuthGuard` (public bypass, missing bearer, verify failure, valid token populates `req.user`), `AdminGuard` (admin allowed, developer forbidden, `@Roles` override), Zod auth schemas.
+2. **Integration** (`test/health.e2e-spec.ts`) — boots a minimal Nest application that mounts `ConfigModule`, `LoggerModule`, `CorrelationMiddleware`, and a stand-alone liveness controller; exercises the live probe + 404 envelope without requiring real Postgres / Redis. End-to-end integration against the full `AppModule` (which boots TypeORM + ioredis + WAHA) and a live login → refresh → logout flow are deferred to the Testcontainers harness in Phase 12.
 3. **Coverage** — V8 provider, excludes `*.module.ts`, `*.d.ts`, and `main.ts`.
 
-Path alias `@app/*` → `src/*` works in both `tsc` and Vitest (the latter via `vite-tsconfig-paths`). All persistence unit tests use in-memory fakes (mocked `QueryRunner`, in-memory Redis double) — no Docker required.
+Path alias `@app/*` → `src/*` works in both `tsc` and Vitest (the latter via `vite-tsconfig-paths`). All persistence + auth unit tests use in-memory fakes (mocked `QueryRunner`, in-memory Redis double, in-memory token/audit map, mocked `JwtService`) — no Docker required.
 
 ## 11. Scripts (`package.json`)
 
@@ -193,6 +215,7 @@ Path alias `@app/*` → `src/*` works in both `tsc` and Vitest (the latter via `
 | `migrate:generate -- src/infra/db/migrations/<Name>` | Generate a migration from entity diff. |
 | `migrate:create -- src/infra/db/migrations/<Name>` | Create an empty migration file. |
 | `migrate:show` | List applied / pending migrations. |
+| `seed` | Idempotently upserts the default admin (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`; defaults to `admin@test.com` / `password123`). |
 | `typeorm` | Direct TypeORM CLI passthrough (`ts-node -r tsconfig-paths/register …`). |
 | `prepare` | Installs Husky hooks from the repo root. |
 
@@ -239,10 +262,10 @@ Successful 2xx responses are free-form per endpoint and validated by the fronten
 ### Cookies, credentials, CSRF
 
 - CORS is configured with `credentials: true` (`src/main.ts`).
-- Frontend HTTP client (Phase 3) uses `withCredentials: true`.
-- Phase 3 auth (planned) issues an httpOnly refresh cookie; access tokens stay in memory only.
-- Cookie attributes (planned): `HttpOnly; Secure; SameSite=Lax; Path=/api/auth`. `Secure` is required in production; `SameSite=Lax` is correct for a same-site dev flow and works cross-origin in production when the frontend and backend share an eTLD+1. Cross-site deployments need `SameSite=None; Secure`.
-- CSRF: the frontend never reads cookies from JS (refresh cookie is httpOnly); the access token in `Authorization: Bearer` is not vulnerable to CSRF.
+- Frontend HTTP client uses `withCredentials: true`.
+- Phase 3 auth issues an httpOnly refresh cookie on login + refresh; access tokens are returned in the JSON body and stay in memory only.
+- Cookie attributes (live): `HttpOnly; Secure; SameSite=Strict; Path=/api/auth` (cookie name configurable via `REFRESH_COOKIE_NAME`, default `dd_refresh`; `REFRESH_COOKIE_SECURE=false` only for local plain-HTTP dev; optional `REFRESH_COOKIE_DOMAIN` for parent-domain serving). `SameSite=Strict` is correct because the refresh endpoint is only ever called by first-party JS from the frontend SPA. Cross-site deployments where the SPA and API live on unrelated eTLD+1s must reconfigure to `SameSite=None; Secure` deliberately.
+- CSRF: the frontend never reads cookies from JS (refresh cookie is httpOnly); the access token in `Authorization: Bearer` is not vulnerable to CSRF. `SameSite=Strict` blocks cross-site refresh attempts at the browser layer.
 
 ### Health endpoints (frontend may probe)
 
@@ -255,7 +278,7 @@ The frontend's later phases assume these endpoints. They land in the correspondi
 
 | Frontend phase | Endpoints / channels expected | Backend phase |
 | --- | --- | --- |
-| 3 — auth | `POST /api/auth/login`, `POST /api/auth/refresh` (cookie), `POST /api/auth/logout`, `PATCH /api/auth/password`, `GET /api/auth/me` | 3 — Auth |
+| 3 — auth | `POST /api/auth/login`, `POST /api/auth/refresh` (cookie), `POST /api/auth/logout`, `PATCH /api/auth/password` — all live. `GET /api/auth/me` not yet built; user profile is currently embedded in the login/refresh response body. | 3 — Auth (✅) |
 | 5 — realtime core | Socket.IO over `websocket` transport, handshake `{ auth: { token } }`, server-emitted `error:invalid_payload`, `GET /api/sync?since=<seq>` | 4+ |
 | 7 — chats | `GET /api/chats`, `POST /api/chats/:chatId/read`, mute toggle | 5+ |
 | 8 — messages | `GET /api/messages/:chatId`, `POST /api/messages/:chatId/send`, `PATCH`/`DELETE`/`POST /reaction`, `POST /api/messages/forward`, `GET /api/chats/:chatId/participants` | 5+ |
@@ -285,14 +308,16 @@ If any of these change, update this section and the frontend's [docs/context.md]
 
 | Area | Doc | Status |
 | --- | --- | --- |
-| Bootstrap (`main.ts`, `AppModule`) | [modules/bootstrap.md](modules/bootstrap.md) | ✅ Phase 1 + 2 wiring |
-| ConfigModule + env parsing | [modules/config.md](modules/config.md) | ✅ Phase 1 + 2 surface |
+| Bootstrap (`main.ts`, `AppModule`) | [modules/bootstrap.md](modules/bootstrap.md) | ✅ Phase 1–3 wiring |
+| ConfigModule + env parsing | [modules/config.md](modules/config.md) | ✅ Phase 1–3 surface |
 | LoggerModule (`nestjs-pino`) | [modules/logger.md](modules/logger.md) | ✅ Phase 1 |
-| Common (middleware, filter, pipe, decorators) | [modules/common.md](modules/common.md) | ✅ Phase 1 |
+| Common (middleware, filter, pipe, decorators, guards) | [modules/common.md](modules/common.md) | ✅ Phase 1 + 3 |
 | Shared (errors, branded IDs, Result, Express types) | [modules/shared.md](modules/shared.md) | ✅ Phase 1 |
-| DatabaseModule (TypeORM, naming, transactions, migrations) | [modules/db.md](modules/db.md) | ✅ Phase 2 |
+| DatabaseModule (TypeORM, naming, transactions, migrations) | [modules/db.md](modules/db.md) | ✅ Phase 2 + 3 (migration 0002 auth) |
 | CacheModule (Redis client, CacheService, DistributedLockService) | [modules/cache.md](modules/cache.md) | ✅ Phase 2 |
 | HealthModule | [modules/health.md](modules/health.md) | ✅ Phase 2 (terminus DB + Redis) |
+| UsersModule | [modules/users.md](modules/users.md) | ✅ Phase 3 |
+| AuthModule | [modules/auth.md](modules/auth.md) | ✅ Phase 3 |
 
 Future phases will add their own entries to this table.
 
@@ -308,6 +333,8 @@ Future phases will add their own entries to this table.
 - **Naming strategy is the only casing authority.** Entity properties are camelCase; the database is snake_case. Do **not** pass `name:` to `@Column`, `@JoinColumn`, or `@JoinTable` — ESLint (`no-restricted-syntax`) flags it. For unavoidable legacy mappings add `// naming-override: <reason>` and `// eslint-disable-next-line no-restricted-syntax`.
 - **Transactions go through `TransactionRunner.run(async (em) => …)`** (or the standalone `withTransaction(dataSource, …)` outside Nest DI). Do not call `dataSource.transaction(...)` directly — the helpers preserve commit / rollback / release semantics in one place.
 - **Cache reads through `CacheService.wrap`.** Always provide a Zod schema so cached payloads from previous deploys cannot poison the typed surface.
+- **Auth on by default.** Controllers under `/api` should be guarded with `@UseGuards(JwtAuthGuard)` at the class or method level. Only explicitly public endpoints (e.g. login, refresh, public webhooks) carry the `@Public()` decorator. Admin-only endpoints add `@UseGuards(JwtAuthGuard, AdminGuard)` (optionally narrowed by `@Roles(UserRole.ADMIN)`).
+- **Append-only audit log.** Sensitive state changes (login attempts, password change, logout, future user disable / assignment changes) must call `AuthRepository.writeAudit(event, userId, payload?)`. Never update or delete rows in `audit_log`.
 
 ## 15. How to add a new module (for now)
 

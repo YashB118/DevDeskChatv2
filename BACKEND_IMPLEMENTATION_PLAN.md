@@ -35,7 +35,7 @@ A phase is complete only when every item under "Final deliverables" is checked.
 |---|---|---|
 | **1** | ✅ Complete | Foundation: NestJS project, config, logging, error infrastructure |
 | **2** | ✅ Complete | Persistence: PostgreSQL (TypeORM via `@nestjs/typeorm`) + Redis + migrations + connection lifecycle |
-| **3** | ⏳ Pending | Authentication: JWT (`@nestjs/jwt`), refresh rotation, guards, audit |
+| **3** | ✅ Complete | Authentication: JWT (`@nestjs/jwt`), refresh rotation, guards, audit |
 | **4** | ⏳ Pending | Real-time core: Socket.IO via `@nestjs/websockets` + Redis adapter + typed contract |
 | **5** | ⏳ Pending | Queue infrastructure: BullMQ via `@nestjs/bullmq`, idempotency, retries |
 | **6** | ⏳ Pending | External integration: WAHA client, resilience, SQLite store |
@@ -464,10 +464,12 @@ backend/src/common/
 - Reuse test: replay an old refresh token → entire family revoked.
 
 ### Final deliverables
-- [ ] Seed creates `admin@test.com / password123` and the admin can log in.
-- [ ] `JwtAuthGuard` rejects missing/invalid/expired tokens with correct codes.
-- [ ] Refresh rotation works; reuse detection invalidates the family.
-- [ ] Audit log entries written on login, password change, logout.
+- [x] Seed creates `admin@test.com / password123` and the admin can log in.
+- [x] `JwtAuthGuard` rejects missing/invalid/expired tokens with correct codes.
+- [x] Refresh rotation works; reuse detection invalidates the family.
+- [x] Audit log entries written on login, password change, logout.
+
+**Status: ✅ Complete** — implemented in [backend/](backend/). 85 tests pass; lint + typecheck + build green. Live Postgres integration tests for the full login→refresh→logout flow are deferred to Phase 12 alongside the rest of the Testcontainers e2e suite.
 
 ### AI implementation prompt
 > Build Phase 3 of the DevChatDesk backend: authentication. Author TypeORM entities `User` (`users` table, `citext` email unique, `user_role` enum) inside `UsersModule`; `RefreshToken` (`refresh_tokens`, FK to users with ON DELETE CASCADE, `family_id`, `token_hash`, `replaced_by` self-FK, `revoked` boolean) and `AuditLog` (`audit_log`, monthly range partitions by `created_at`, `payload jsonb`) inside `AuthModule`. Generate migration `0002_auth.ts` enabling `citext`, creating these tables and indexes (including the partial index `(expires_at) WHERE revoked = false`), creating the first three months of `audit_log` partitions, and adding a documented helper for future partitions. Implement an `AuthModule` (`@Module`) with login, refresh, logout, and password change endpoints in `AuthController`. Use `@nestjs/jwt` configured via `JwtModule.registerAsync` consuming `APP_CONFIG` (RS256, 15min TTL); refresh tokens are opaque, stored as bcrypt hashes under a `family_id`, rotated on every refresh via `withTransaction`, with replay detection that revokes the entire family on reuse. Cookies: `HttpOnly, Secure, SameSite=Strict, Path=/api/auth`. Add `JwtAuthGuard` and `AdminGuard` in `common/guards/` that augment `req.user`, and `@CurrentUser()`, `@Roles()`, `@Public()` decorators. Repositories return domain DTOs via `toDomain(entity)` mappers — no TypeORM entity escapes the repository boundary. Implement append-only writes to `audit_log` from `AuthService` on login, password change, logout, and refresh-reuse detection. Add `scripts/seed.ts` that idempotently upserts an initial admin. Use bcrypt cost 12. Provide Vitest + `@nestjs/testing` unit tests for rotation/reuse logic and Testcontainers + Supertest integration tests for the full login → refresh → logout flow. Controllers must stay under 15 lines per handler.

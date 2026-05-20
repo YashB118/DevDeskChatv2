@@ -2,7 +2,7 @@
 
 Per-module context files. Add a new file here only when actual code for that module lands — empty stub folders do not get docs (progressive build rule).
 
-## Built modules (after Phase 2)
+## Built modules (after Phase 3)
 
 | Module | Doc | Source |
 |---|---|---|
@@ -10,16 +10,18 @@ Per-module context files. Add a new file here only when actual code for that mod
 | Environment Configuration | [`env.md`](env.md) | `frontend/src/lib/env.ts` |
 | Branded ID Types | [`shared-ids.md`](shared-ids.md) | `frontend/src/shared/types/ids.ts` |
 | Design System — tokens, theme, motion, primitives, compounds, icons | [`design-system.md`](design-system.md) | `frontend/src/design-system/`, `frontend/src/styles/`, `frontend/public/theme-bootstrap.js`, `frontend/src/shared/utils/cn.ts`, `frontend/.storybook/` |
+| HTTP Client + Errors + Refresh Queue | [`http.md`](http.md) | `frontend/src/lib/http/`, `frontend/src/lib/storage/memory.ts` |
+| Realtime Event Bus | [`realtime-event-bus.md`](realtime-event-bus.md) | `frontend/src/realtime/eventBus.ts` |
+| Auth Feature | [`auth.md`](auth.md) | `frontend/src/features/auth/` |
 | Tooling & Build | [`tooling.md`](tooling.md) | `frontend/package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `eslint.config.js`, `.storybook/`, `.github/workflows/frontend.yml` |
 
 ## Not yet built
 
 The following modules have empty stub folders but no implementation. Docs land when the implementation does.
 
-- `features/auth` (Phase 3)
 - `app/router` + guards (Phase 4)
-- `realtime` (Phase 5)
-- `lib/http`, `lib/storage` (Phase 3, 6)
+- `realtime/` socket singleton, `useSocketEvent`, `SyncController`, reconnect (Phase 5)
+- `lib/storage` IndexedDB / Dexie persistence layer (Phase 6) — note: `lib/storage/memory.ts` already shipped in Phase 3 and is documented in [`http.md`](http.md)
 - TanStack Query / Zustand state foundation (Phase 6)
 - `features/chats` (Phase 7)
 - `features/messages` (Phase 8)

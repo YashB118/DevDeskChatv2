@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { loadEnv } from './env';
 
+const DUMMY_PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----\ndummy\n-----END PRIVATE KEY-----';
+const DUMMY_PUBLIC_KEY = '-----BEGIN PUBLIC KEY-----\ndummy\n-----END PUBLIC KEY-----';
+
 const baseEnv = {
   DATABASE_URL: 'postgres://user:pass@localhost:5432/devdesk',
   REDIS_URL: 'redis://localhost:6379',
+  JWT_PRIVATE_KEY: DUMMY_PRIVATE_KEY,
+  JWT_PUBLIC_KEY: DUMMY_PUBLIC_KEY,
 };
 
 describe('loadEnv', () => {
@@ -44,14 +49,31 @@ describe('loadEnv', () => {
   });
 
   it('rejects when DATABASE_URL is missing', () => {
-    expect(() => loadEnv({ REDIS_URL: baseEnv.REDIS_URL })).toThrow(/DATABASE_URL/);
+    const { DATABASE_URL: _omit, ...rest } = baseEnv;
+    expect(() => loadEnv(rest)).toThrow(/DATABASE_URL/);
   });
 
   it('rejects when REDIS_URL is missing', () => {
-    expect(() => loadEnv({ DATABASE_URL: baseEnv.DATABASE_URL })).toThrow(/REDIS_URL/);
+    const { REDIS_URL: _omit, ...rest } = baseEnv;
+    expect(() => loadEnv(rest)).toThrow(/REDIS_URL/);
   });
 
   it('rejects an invalid DATABASE_URL', () => {
     expect(() => loadEnv({ ...baseEnv, DATABASE_URL: 'not-a-url' })).toThrow(/DATABASE_URL/);
+  });
+
+  it('rejects when JWT keys are missing', () => {
+    const { JWT_PRIVATE_KEY: _o1, JWT_PUBLIC_KEY: _o2, ...rest } = baseEnv;
+    expect(() => loadEnv(rest)).toThrow(/JWT_PRIVATE_KEY/);
+  });
+
+  it('normalizes escaped \\n into real newlines in PEM keys', () => {
+    const config = loadEnv({
+      ...baseEnv,
+      JWT_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nABCD\\n-----END PRIVATE KEY-----',
+    });
+    expect(config.JWT_PRIVATE_KEY).toBe(
+      '-----BEGIN PRIVATE KEY-----\nABCD\n-----END PRIVATE KEY-----',
+    );
   });
 });

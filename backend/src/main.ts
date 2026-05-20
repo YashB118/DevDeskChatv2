@@ -2,10 +2,12 @@ import 'reflect-metadata';
 // Load `.env` into process.env BEFORE any module reads config.
 // Must precede `AppModule` import (transitively imports env.ts via ConfigModule).
 import 'dotenv/config';
+import { RequestMethod } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { APP_CONFIG } from './config/constants';
 import { type AppConfig } from './config/env';
@@ -24,12 +26,17 @@ async function bootstrap(): Promise<void> {
   if (config.TRUST_PROXY) app.set('trust proxy', 1);
 
   app.use(helmet());
+  app.use(cookieParser());
   app.enableCors({
     origin: config.CORS_ORIGINS.includes('*') ? true : config.CORS_ORIGINS,
     credentials: true,
   });
   app.useBodyParser('json', { limit: config.BODY_LIMIT });
   app.useBodyParser('urlencoded', { limit: config.BODY_LIMIT, extended: true });
+
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }],
+  });
 
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableShutdownHooks();

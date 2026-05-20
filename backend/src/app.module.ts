@@ -6,9 +6,19 @@ import { CacheModule } from '@app/infra/cache/cache.module';
 import { HealthModule } from '@app/infra/health/health.module';
 import { CorrelationMiddleware } from '@app/common/middleware/correlation.middleware';
 import { TransactionRunner } from '@app/infra/db/transactions';
+import { UsersModule } from '@app/modules/users/users.module';
+import { AuthModule } from '@app/modules/auth/auth.module';
 
 @Module({
-  imports: [ConfigModule, LoggerModule, DatabaseModule, CacheModule, HealthModule],
+  imports: [
+    ConfigModule,
+    LoggerModule,
+    DatabaseModule,
+    CacheModule,
+    HealthModule,
+    UsersModule,
+    AuthModule,
+  ],
   providers: [TransactionRunner],
   exports: [TransactionRunner],
 })

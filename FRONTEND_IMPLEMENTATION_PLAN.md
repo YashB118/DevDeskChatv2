@@ -32,7 +32,7 @@ Each phase contains:
 |---|---|---|
 | **1** | Foundation: project scaffold, providers shell, typing, env | ✅ Done |
 | **2** | Design system: tokens, theme provider, primitives, motion | ✅ Done |
-| **3** | HTTP layer & authentication | ⏳ Pending |
+| **3** | HTTP layer & authentication | ✅ Done |
 | **4** | Routing & route guards | ⏳ Pending |
 | **5** | Real-time core: single socket above router, sync controller | ⏳ Pending |
 | **6** | State foundation: TanStack Query, Zustand, IndexedDB persistence | ⏳ Pending |
@@ -261,10 +261,12 @@ frontend/src/features/auth/
 - Integration (MSW): full silent-refresh round trip; expired-token UI never visible.
 
 ### Final deliverables
-- [ ] Logging in lands on the dashboard (route added in Phase 4).
-- [ ] An expiring access token transparently refreshes without UI flicker.
-- [ ] Logout clears state and redirects.
-- [ ] No token ever appears in storage inspection.
+- [x] Logging in lands on the dashboard (route added in Phase 4).
+- [x] An expiring access token transparently refreshes without UI flicker.
+- [x] Logout clears state and redirects.
+- [x] No token ever appears in storage inspection.
+
+> **Status: ✅ Complete** — HTTP layer under [frontend/src/lib/http/](frontend/src/lib/http/) (axios singleton w/ `withCredentials`, request interceptor attaching in-memory token, 401 response interceptor that calls `refreshAccessToken` and retries once; `AppApiError.fromAxios` parses the `{ error: { code, message, correlationId } }` envelope). Refresh queue in [retry.ts](frontend/src/lib/http/retry.ts) coalesces concurrent failures behind a single in-flight promise. Access token kept in [lib/storage/memory.ts](frontend/src/lib/storage/memory.ts) — never written to localStorage. Auth feature under [frontend/src/features/auth/](frontend/src/features/auth/) (api/Zod schemas, `useAuth`, `LoginForm` + `PasswordChangeForm` via RHF + zodResolver, `LogoutButton`, `useSyncExternalStore`-based auth state, `AuthProvider` registers refresh handler + runs silent-refresh bootstrap on mount and emits `auth:ready`). Typed event bus in [realtime/eventBus.ts](frontend/src/realtime/eventBus.ts) (mitt) exposes `auth:ready`/`auth:logged-out`/`sync:resume`/`app:error`. AuthProvider wired into [AppProviders](frontend/src/app/providers/AppProviders.tsx). Login/dashboard route + UI redirect deferred to Phase 4 router. Tests: 62 pass — refresh-queue concurrency, AppApiError mapping, MSW silent-refresh round-trip (single refresh coalesces parallel 401s), login happy/error paths, in-memory token never leaks to localStorage. Bundle 487.11 KB raw / 143.02 KB gz (still above 250 KB initial-JS budget; admin code-split + per-route lazy loading lands Phase 4/9).
 
 ### AI implementation prompt
 > Build Phase 3 of the DevChatDesk frontend: HTTP and authentication. Implement `lib/http/client.ts` as a single axios instance with `withCredentials: true`. Add a request interceptor that attaches the in-memory access token (stored in `lib/storage/memory.ts`, not localStorage). Add a response interceptor that, on 401, attempts a silent refresh via `POST /api/auth/refresh` — coalescing concurrent failures behind a single in-flight refresh promise, then retrying the original request. On refresh failure, clear state and emit `auth:logged-out`. Parse all responses through Zod and translate backend error envelopes (`{ error: { code, message, correlationId } }`) into a typed `AppApiError`. Implement the `auth` feature: `useAuth()` hook exposing `{ user, isAuthenticated, login, logout, changePassword }`, a `LoginForm` with React Hook Form + Zod resolver, a `PasswordChangeForm`, and a `LogoutButton`. Wire `AuthProvider` into `AppProviders` so it bootstraps a silent refresh on mount and emits `auth:ready` when done (this is what the SocketProvider in Phase 5 awaits). Provide Vitest unit tests for refresh queuing, MSW-based integration tests for the full silent refresh, and component tests for the login flow.

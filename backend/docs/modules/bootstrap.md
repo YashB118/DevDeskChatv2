@@ -10,16 +10,16 @@
 
 ## 1. Responsibility
 
-- Wire the Nest application from its dependency modules (`ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`).
+- Wire the Nest application from its dependency modules (`ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, `AuthModule`).
 - Apply request-level middleware to all routes.
-- Configure transport-layer concerns (helmet, CORS, body parser limits).
+- Configure transport-layer concerns (helmet, cookie-parser, CORS, body parser limits, `/api` global prefix).
 - Register the global exception filter.
 - Enable graceful shutdown hooks so infrastructure modules (Redis, TypeORM) release resources cleanly.
 - Bridge `console.log`-style accidents into structured logs by re-routing Nest's internal logger to Pino.
 
 ## 2. `AppModule`
 
-- Decorated with imports in order: `ConfigModule` (must parse first because it is `@Global()` and feeds every other factory), `LoggerModule`, `DatabaseModule` (`@Global`, opens TypeORM during Nest bootstrap), `CacheModule` (`@Global`, opens the ioredis client), `HealthModule` (depends on both for its terminus probes).
+- Decorated with imports in order: `ConfigModule` (must parse first because it is `@Global()` and feeds every other factory), `LoggerModule`, `DatabaseModule` (`@Global`, opens TypeORM during Nest bootstrap), `CacheModule` (`@Global`, opens the ioredis client), `HealthModule` (depends on both for its terminus probes), `UsersModule`, `AuthModule`. `AuthModule` must come after `UsersModule` because it imports `UserRepository`.
 - Registers `TransactionRunner` (from `@app/infra/db/transactions`) as a provider and re-exports it so any feature module can inject it without importing TypeORM directly.
 - Implements `NestModule` and mounts `CorrelationMiddleware` for `'*'` (every route, including future ones). This is the only middleware bound at this layer — anything else belongs in `main.ts` or in a feature module.
 - Holds no controllers of its own. It is a composition seam plus the home of one cross-cutting provider.
@@ -34,11 +34,13 @@ The `bootstrap()` async function performs the following ordered steps. Order is 
 4. **Disable `x-powered-by`** by calling `app.disable('x-powered-by')` on the underlying Express instance.
 5. **Conditionally trust the proxy** based on `TRUST_PROXY`. The value `true` sets `trust proxy` to `1` (the first hop), suitable when running behind a single load balancer.
 6. **Apply `helmet()`** with its default policy set (CSP, HSTS, X-Content-Type-Options, etc.).
-7. **Enable CORS** with `app.enableCors(...)`. If `CORS_ORIGINS` contains a literal `*`, `origin: true` is used; otherwise the string array is passed verbatim. `credentials: true` is always set so cookie-based refresh tokens (Phase 3) work without extra wiring later.
-8. **Set body parser limits** for both JSON and urlencoded via `app.useBodyParser(...)`, sourced from `BODY_LIMIT`.
-9. **Install the global exception filter** `new AllExceptionsFilter()`. This is the only place that filter is registered.
-10. **Enable shutdown hooks** with `app.enableShutdownHooks()`. This is required so `CacheModule.OnApplicationShutdown` runs (`redis.quit()`) and Nest's TypeORM lifecycle closes the DataSource on SIGTERM. Phase 4+ will lean on the same mechanism for the Socket.IO adapter and BullMQ workers.
-11. **Start listening** on `PORT`, then emit a single info-level log line with the bound URL.
+7. **Mount `cookieParser()`** so `req.cookies` is populated before `AuthController.refresh` / `logout` read the refresh cookie. Order matters: this must precede route resolution.
+8. **Enable CORS** with `app.enableCors(...)`. If `CORS_ORIGINS` contains a literal `*`, `origin: true` is used; otherwise the string array is passed verbatim. `credentials: true` is always set so the refresh cookie flows on cross-origin requests.
+9. **Set body parser limits** for both JSON and urlencoded via `app.useBodyParser(...)`, sourced from `BODY_LIMIT`.
+10. **Apply the `/api` global prefix** via `app.setGlobalPrefix('api', { exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }] })`. Every business controller (`AuthController` and successors) is now served under `/api/...`; the health endpoints intentionally stay at `/health/live` and `/health/ready` so orchestrator probes do not need to learn a prefix.
+11. **Install the global exception filter** `new AllExceptionsFilter()`. This is the only place that filter is registered.
+12. **Enable shutdown hooks** with `app.enableShutdownHooks()`. This is required so `CacheModule.OnApplicationShutdown` runs (`redis.quit()`) and Nest's TypeORM lifecycle closes the DataSource on SIGTERM. Phase 4+ will lean on the same mechanism for the Socket.IO adapter and BullMQ workers.
+13. **Start listening** on `PORT`, then emit a single info-level log line with the bound URL.
 
 ## 4. Process-level handlers
 
@@ -58,8 +60,8 @@ If a future change wants a global pipe (e.g., for query string defaults), do it 
 ## 6. Production vs development behaviour
 
 - `NODE_ENV=development` (default): Pino emits via `pino-pretty` (single-line, coloured, human-readable timestamps).
-- `NODE_ENV=production`: plain JSON lines suitable for ingestion by Loki/Datadog/CloudWatch. `PG_SSL=true` is also expected here so TypeORM connects with `ssl: { rejectUnauthorized: true }`.
-- `NODE_ENV=test`: same JSON output. Tests that boot the app via `Test.createTestingModule` must register `AllExceptionsFilter` themselves and, if they pull in `AppModule` directly, must provide working `DATABASE_URL` + `REDIS_URL` values (either real or via Testcontainers). The current `test/health.e2e-spec.ts` sidesteps this by composing a minimal test module rather than the full `AppModule`.
+- `NODE_ENV=production`: plain JSON lines suitable for ingestion by Loki/Datadog/CloudWatch. `PG_SSL=true` is also expected here so TypeORM connects with `ssl: { rejectUnauthorized: true }`, plus `REFRESH_COOKIE_SECURE=true` so the refresh cookie is only ever sent over HTTPS.
+- `NODE_ENV=test`: same JSON output. Tests that boot the app via `Test.createTestingModule` must register `AllExceptionsFilter` themselves and, if they pull in `AppModule` directly, must provide working `DATABASE_URL` + `REDIS_URL` + `JWT_PRIVATE_KEY` + `JWT_PUBLIC_KEY` values (either real or via Testcontainers / stub PEMs). The current `test/health.e2e-spec.ts` sidesteps this by composing a minimal test module rather than the full `AppModule`.
 
 ## 7. Common editing mistakes
 
@@ -80,10 +82,9 @@ If a future change wants a global pipe (e.g., for query string defaults), do it 
 
 ## 9. Future evolution
 
-Phases 3+ will add:
+Phase 3 added `UsersModule` + `AuthModule`, `cookie-parser`, the `/api` prefix, and per-controller `JwtAuthGuard`. Still pending:
 
 - A `WebSocket` adapter (`app.useWebSocketAdapter(new SocketRedisAdapter(app))`) registered in `main.ts` **after** Redis is ready (Phase 4).
-- Global guards (`JwtAuthGuard`) for the admin/protected surface (Phase 3).
 - `BullModule.forRootAsync` + `BullModule.registerQueue(...)` imports on `AppModule` (Phase 5).
 - A custom rate-limit module bound globally (Phase 11).
 

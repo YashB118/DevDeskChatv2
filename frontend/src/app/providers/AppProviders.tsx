@@ -1,6 +1,7 @@
 import type { ReactNode, ReactElement } from 'react';
 import { ThemeProvider } from '@/design-system/theme';
 import { ToastProvider } from '@/design-system/primitives/Toast';
+import { AuthProvider } from '@/features/auth';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -8,15 +9,10 @@ interface AppProvidersProps {
 
 // Placeholder providers — real implementations land in later phases:
 //   QueryProvider     → Phase 6
-//   AuthProvider      → Phase 3
 //   SocketProvider    → Phase 5
 //   SyncController    → Phase 5
 
 function QueryProvider({ children }: { children: ReactNode }): ReactElement {
-  return <>{children}</>;
-}
-
-function AuthProvider({ children }: { children: ReactNode }): ReactElement {
   return <>{children}</>;
 }
 
