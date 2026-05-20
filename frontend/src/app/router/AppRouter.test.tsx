@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Suspense, lazy, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { resetAuthState, setAuthState } from '@/features/auth/store/auth.store';
 import { BootGate } from '@/app/ui/BootGate';
 import { ProtectedRoute } from './guards/ProtectedRoute';
@@ -46,9 +47,13 @@ function AdminOutlet(): ReactElement {
 }
 
 function renderAt(path: string): ReturnType<typeof render> {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: 0, gcTime: 0 } },
+  });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route
           path="/login"
@@ -71,7 +76,8 @@ function renderAt(path: string): ReturnType<typeof render> {
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </MemoryRouter>,
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -99,7 +105,7 @@ describe('AppRouter — guards', () => {
   it('redirects a non-admin developer from /admin to /dashboard', async () => {
     setAuthState({
       status: 'authenticated',
-      user: { id: 'u1', email: 'dev@example.com', name: 'Dev', role: 'developer' },
+      user: { id: 'u1', email: 'dev@example.com', displayName: 'Dev', role: 'DEVELOPER' },
       error: null,
     });
     renderAt('/admin');
@@ -111,7 +117,7 @@ describe('AppRouter — guards', () => {
   it('renders admin shell for an admin user at /admin/sessions', async () => {
     setAuthState({
       status: 'authenticated',
-      user: { id: 'u2', email: 'a@example.com', name: 'Admin', role: 'admin' },
+      user: { id: 'u2', email: 'a@example.com', displayName: 'Admin', role: 'ADMIN' },
       error: null,
     });
     renderAt('/admin/sessions');
@@ -124,7 +130,7 @@ describe('AppRouter — guards', () => {
   it('redirects an authenticated user away from /login to /dashboard', async () => {
     setAuthState({
       status: 'authenticated',
-      user: { id: 'u3', email: 'x@example.com', name: 'X', role: 'developer' },
+      user: { id: 'u3', email: 'x@example.com', displayName: 'X', role: 'DEVELOPER' },
       error: null,
     });
     renderAt('/login');
@@ -136,7 +142,7 @@ describe('AppRouter — guards', () => {
   it('root redirects authenticated user to /dashboard', async () => {
     setAuthState({
       status: 'authenticated',
-      user: { id: 'u4', email: 'r@example.com', name: 'R', role: 'developer' },
+      user: { id: 'u4', email: 'r@example.com', displayName: 'R', role: 'DEVELOPER' },
       error: null,
     });
     renderAt('/');
@@ -170,7 +176,7 @@ describe('AppRouter — chat id param', () => {
   it('renders ChatPage with branded chat id', async () => {
     setAuthState({
       status: 'authenticated',
-      user: { id: 'u5', email: 'c@example.com', name: 'C', role: 'developer' },
+      user: { id: 'u5', email: 'c@example.com', displayName: 'C', role: 'DEVELOPER' },
       error: null,
     });
     renderAt('/dashboard/chat-123');

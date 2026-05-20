@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { setAccessToken } from '@/lib/storage/memory';
 import { eventBus } from '@/realtime/eventBus';
+import { useCurrentUserStore } from '@/shared/state/currentUser';
 import { toUserId } from '@/shared/types/ids';
 import { authApi } from '../api/auth.api';
 import { resetAuthState, setAuthState } from '../store/auth.store';
@@ -14,10 +15,10 @@ export function useBootstrapAuth(): void {
 
     void (async () => {
       try {
-        const { accessToken } = await authApi.refresh();
+        const { accessToken, user } = await authApi.refresh();
         setAccessToken(accessToken);
-        const user = await authApi.me();
         setAuthState({ status: 'authenticated', user, error: null });
+        useCurrentUserStore.getState().setUser({ id: user.id, displayName: user.displayName });
         eventBus.emit('auth:ready', { userId: toUserId(user.id) });
       } catch {
         resetAuthState();

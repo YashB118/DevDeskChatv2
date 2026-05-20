@@ -65,6 +65,40 @@ export const EnvSchema = z.object({
 
   // Auth — password hashing
   BCRYPT_COST: z.coerce.number().int().min(4).max(15).default(12),
+
+  // Queues — BullMQ
+  QUEUE_PREFIX: z.string().min(1).default('devdesk-bull'),
+  QUEUE_DEFAULT_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  QUEUE_DEFAULT_BACKOFF_MS: z.coerce.number().int().positive().default(1000),
+  QUEUE_REMOVE_ON_COMPLETE: z.coerce.number().int().min(0).default(1000),
+  QUEUE_REMOVE_ON_FAIL: z.coerce.number().int().min(0).default(5000),
+
+  // WAHA HTTP client
+  WAHA_BASE_URL: z.string().url(),
+  WAHA_API_KEY: z.string().min(1).optional(),
+  WAHA_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  WAHA_MEDIA_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  WAHA_RETRY_MAX: z.coerce.number().int().min(0).max(10).default(3),
+  WAHA_RETRY_BASE_MS: z.coerce.number().int().positive().default(150),
+  WAHA_CB_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(5),
+  WAHA_CB_COOLDOWN_MS: z.coerce.number().int().positive().default(30000),
+  WAHA_SESSIONS_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10000),
+  WAHA_CHATS_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(10000),
+  WAHA_STATUS_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(5000),
+
+  // WAHA NOWEB SQLite store (read-only)
+  WAHA_STORE_PATH: z.string().min(1),
+  WAHA_STORE_REQUIRE_READONLY: boolish.default('false'),
+  WAHA_STORE_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(60000),
+
+  // WAHA webhook ingestion (Phase 7)
+  // Optional HMAC shared secret. When set, every webhook request must carry
+  // a matching `X-Webhook-Hmac` (hex SHA-256) header.
+  WAHA_WEBHOOK_HMAC_SECRET: z.string().min(1).optional(),
+  // Header name WAHA uses to deliver the HMAC signature.
+  WAHA_WEBHOOK_HMAC_HEADER: z.string().min(1).default('x-webhook-hmac'),
+  // Pending-send reconciliation window (must outlive the WAHA round-trip).
+  PENDING_MESSAGE_TTL_MS: z.coerce.number().int().positive().default(9000),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

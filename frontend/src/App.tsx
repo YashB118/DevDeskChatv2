@@ -3,6 +3,9 @@ import { AppErrorBoundary } from '@/app/errors/AppErrorBoundary';
 import { AppProviders } from '@/app/providers/AppProviders';
 import { AppRouter } from '@/app/router/AppRouter';
 import { Styleguide } from '@/app/ui/Styleguide';
+import { ensureFeatureSyncRegistered } from '@/app/sync/featureSync';
+
+ensureFeatureSyncRegistered();
 
 function isStyleguidePath(): boolean {
   if (typeof window === 'undefined') return false;

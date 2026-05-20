@@ -5,6 +5,7 @@ declare module 'express-serve-static-core' {
   interface Request {
     correlationId?: string;
     log?: Logger;
+    rawBody?: Buffer;
   }
 }
 

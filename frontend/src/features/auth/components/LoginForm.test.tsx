@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LoginForm } from './LoginForm';
 import { resetAuthState } from '../store/auth.store';
 import { _resetRefreshState } from '@/lib/http/retry';
@@ -10,14 +10,11 @@ import { server } from '@/tests/mocks/server';
 
 const base = 'http://localhost:3005';
 
-beforeAll(() => { server.listen({ onUnhandledRequest: 'error' }); });
 afterEach(() => {
-  server.resetHandlers();
   _resetRefreshState();
   clearAccessToken();
   resetAuthState();
 });
-afterAll(() => { server.close(); });
 
 beforeEach(() => {
   resetAuthState();
@@ -39,7 +36,7 @@ describe('LoginForm', () => {
       http.post(`${base}/api/auth/login`, () =>
         HttpResponse.json({
           accessToken: 'tok-xyz',
-          user: { id: 'u1', email: 'a@b.com', name: 'Ada', role: 'developer' },
+          user: { id: 'u1', email: 'a@b.com', displayName: 'Ada', role: 'DEVELOPER' },
         }),
       ),
     );

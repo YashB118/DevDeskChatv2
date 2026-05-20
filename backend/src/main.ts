@@ -32,7 +32,14 @@ async function bootstrap(): Promise<void> {
     origin: config.CORS_ORIGINS.includes('*') ? true : config.CORS_ORIGINS,
     credentials: true,
   });
-  app.useBodyParser('json', { limit: config.BODY_LIMIT });
+  app.useBodyParser('json', {
+    limit: config.BODY_LIMIT,
+    // Stash raw bytes for the webhook HMAC verifier. The buffer is small
+    // (limited by BODY_LIMIT) and only held for the request lifetime.
+    verify: (req: { rawBody?: Buffer }, _res: unknown, buf: Buffer): void => {
+      req.rawBody = Buffer.from(buf);
+    },
+  });
   app.useBodyParser('urlencoded', { limit: config.BODY_LIMIT, extended: true });
 
   app.setGlobalPrefix('api', {

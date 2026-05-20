@@ -6,8 +6,6 @@ import {
   type LoginResponse,
   type PasswordChangeInput,
   type RefreshResponse,
-  UserSchema,
-  type User,
 } from '../types';
 
 const skipRefresh = { _skipAuthRefresh: true } as never;
@@ -25,11 +23,6 @@ export const authApi = {
 
   async logout(): Promise<void> {
     await apiClient.post('/api/auth/logout', undefined, skipRefresh);
-  },
-
-  async me(): Promise<User> {
-    const res = await apiClient.get<unknown>('/api/auth/me');
-    return UserSchema.parse(res.data);
   },
 
   async changePassword(input: PasswordChangeInput): Promise<void> {

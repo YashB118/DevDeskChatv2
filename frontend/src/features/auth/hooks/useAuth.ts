@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import { AppApiError } from '@/lib/http/errors';
 import { clearAccessToken, setAccessToken } from '@/lib/storage/memory';
+import { clearAllPersistedData } from '@/lib/storage/persistence.service';
 import { eventBus } from '@/realtime/eventBus';
+import { useCurrentUserStore } from '@/shared/state/currentUser';
 import { toUserId } from '@/shared/types/ids';
 import { authApi } from '../api/auth.api';
 import {
@@ -30,6 +32,7 @@ export function useAuth(): UseAuthReturn {
       const res = await authApi.login(input);
       setAccessToken(res.accessToken);
       setAuthState({ status: 'authenticated', user: res.user, error: null });
+      useCurrentUserStore.getState().setUser({ id: res.user.id, displayName: res.user.displayName });
       eventBus.emit('auth:ready', { userId: toUserId(res.user.id) });
     } catch (err) {
       const message = AppApiError.isAppApiError(err) ? err.message : 'Login failed';
@@ -46,6 +49,8 @@ export function useAuth(): UseAuthReturn {
     }
     clearAccessToken();
     resetAuthState();
+    useCurrentUserStore.getState().setUser(null);
+    await clearAllPersistedData();
     eventBus.emit('auth:logged-out', { reason: 'manual' });
   }, []);
 

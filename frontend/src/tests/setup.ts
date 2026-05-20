@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach, expect } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import * as axeMatchers from 'vitest-axe/matchers';
+import { server } from './mocks/server';
 
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   Object.defineProperty(window, 'matchMedia', {
@@ -21,6 +22,15 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 
 expect.extend(axeMatchers);
 
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'bypass' });
+});
+
 afterEach(() => {
   cleanup();
+  server.resetHandlers();
+});
+
+afterAll(() => {
+  server.close();
 });

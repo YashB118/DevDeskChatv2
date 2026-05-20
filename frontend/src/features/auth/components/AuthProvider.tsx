@@ -4,6 +4,7 @@ import {
   registerRefreshHandler,
 } from '@/lib/http/retry';
 import { clearAccessToken, setAccessToken } from '@/lib/storage/memory';
+import { clearAllPersistedData } from '@/lib/storage/persistence.service';
 import { eventBus } from '@/realtime/eventBus';
 import { authApi } from '../api/auth.api';
 import { useBootstrapAuth } from '../hooks/useBootstrapAuth';
@@ -23,6 +24,7 @@ export function AuthProvider({ children }: AuthProviderProps): ReactElement {
       } catch (err) {
         clearAccessToken();
         resetAuthState();
+        void clearAllPersistedData();
         eventBus.emit('auth:logged-out', { reason: 'refresh-failed' });
         throw err;
       }

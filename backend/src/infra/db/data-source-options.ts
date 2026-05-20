@@ -4,7 +4,7 @@ import { type AppConfig } from '@app/config/env';
 import { SnakeNamingStrategy } from './naming';
 
 const isTsRuntime = __filename.endsWith('.ts');
-const srcRoot = isTsRuntime ? 'src' : 'dist/src';
+const srcRoot = isTsRuntime ? 'src' : 'dist';
 const fileExt = isTsRuntime ? 'ts' : 'js';
 
 interface PgSslOptions {

@@ -1,6 +1,8 @@
 # Frontend Architecture
 
 > Production-grade reference architecture for the DevChatDesk frontend. This document defines the boot sequence, state model, real-time sync engine, design system, and engineering standards. The goal is a WhatsApp-class real-time UI — premium, predictable, and built for scale.
+>
+> **Code alignment.** Phases 1–8 from `FRONTEND_IMPLEMENTATION_PLAN.md` are merged; sections describing observability (§13), notifications (§12), and the offline service worker (§11) are forward-looking targets for Phases 10–11. Where the merged code diverged from the original spec, this document has been updated in place (e.g. §3 folder structure, §4 boot diagram, §5.1 query keys, §6.2 SyncController). The deferred sections are clearly tagged below.
 
 ---
 
@@ -54,23 +56,28 @@ frontend/
 │   ├── app/
 │   │   ├── providers/
 │   │   │   ├── AppProviders.tsx       # Composes all root providers
-│   │   │   ├── QueryProvider.tsx
-│   │   │   ├── ThemeProvider.tsx
-│   │   │   ├── SocketProvider.tsx     # Lives ABOVE the router
-│   │   │   ├── AuthProvider.tsx
-│   │   │   └── ToastProvider.tsx
+│   │   │   └── QueryProvider.tsx
+│   │   │   # ThemeProvider lives in design-system/theme;
+│   │   │   # AuthProvider lives in features/auth/components;
+│   │   │   # SocketProvider + SyncController live in realtime/.
 │   │   ├── router/
 │   │   │   ├── AppRouter.tsx
 │   │   │   ├── routes.ts              # Typed route table
+│   │   │   ├── RouteErrorBoundary.tsx
 │   │   │   ├── guards/
 │   │   │   │   ├── ProtectedRoute.tsx
 │   │   │   │   ├── AdminRoute.tsx
 │   │   │   │   ├── PublicRoute.tsx
 │   │   │   │   └── RootRedirect.tsx
-│   │   │   └── lazyRoutes.ts          # Code-split routes
-│   │   └── errors/
-│   │       ├── AppErrorBoundary.tsx
-│   │       └── RouteErrorBoundary.tsx
+│   │   │   ├── layouts/{DashboardLayout,AdminLayout}.tsx
+│   │   │   ├── pages/                 # Route-level pages (admin sub-tree code-split)
+│   │   │   ├── hooks/useChatIdParam.ts
+│   │   │   └── lazyRoutes.ts          # Typed loader for the admin chunk
+│   │   ├── sync/
+│   │   │   └── featureSync.ts         # Registers every feature's sync handler once at boot
+│   │   ├── errors/
+│   │   │   └── AppErrorBoundary.tsx
+│   │   └── ui/BootGate.tsx
 │   │
 │   ├── features/
 │   │   ├── auth/
@@ -101,12 +108,16 @@ frontend/
 │   │   │   │   ├── MessageBubble/
 │   │   │   │   ├── MessageComposer/
 │   │   │   │   ├── MessageReactions/
+│   │   │   │   ├── MessageQuotedPreview/
 │   │   │   │   └── MessageSearch/
 │   │   │   ├── hooks/
+│   │   │   │   ├── useMessages.ts
+│   │   │   │   └── useMessageMutations.ts
 │   │   │   ├── api/messages.api.ts
 │   │   │   ├── store/messages.store.ts
 │   │   │   ├── sync/messages.sync.ts
-│   │   │   ├── optimistic/            # Optimistic update strategies
+│   │   │   ├── optimistic/index.ts    # Pure helpers (send/edit/delete/react + reconcile)
+│   │   │   ├── types.ts
 │   │   │   └── index.ts
 │   │   ├── sessions/
 │   │   ├── assignments/
@@ -121,9 +132,11 @@ frontend/
 │   │   ├── SocketContext.tsx
 │   │   ├── useSocket.ts
 │   │   ├── useSocketEvent.ts          # Typed event subscription hook
-│   │   ├── eventBus.ts                # Cross-feature event router
-│   │   ├── reconnect.ts               # Backoff + resume-after-disconnect
-│   │   ├── sync.controller.ts         # Orchestrates per-feature sync handlers
+│   │   ├── eventBus.ts                # Cross-feature event router (mitt-backed)
+│   │   ├── reconnect.ts               # Manager backoff config (cap 30s)
+│   │   ├── connectionStatusStore.ts   # Zustand: idle|connecting|connected|reconnecting|offline
+│   │   ├── ConnectionBanner.tsx       # Renders status when ≠ connected
+│   │   ├── sync.controller.ts         # Invokes registered handlers w/ (socket, queryClient)
 │   │   └── events.contract.ts         # Zod-mirrored types from backend
 │   │
 │   ├── design-system/
@@ -149,20 +162,24 @@ frontend/
 │   │   ├── http/
 │   │   │   ├── client.ts              # Axios instance + interceptors
 │   │   │   ├── errors.ts
-│   │   │   └── retry.ts
+│   │   │   └── retry.ts               # Single-flight refresh queue
 │   │   ├── storage/
 │   │   │   ├── memory.ts              # Access token in memory only
-│   │   │   ├── localStorage.ts        # User prefs only
-│   │   │   └── indexedDB.ts           # Dexie schemas
-│   │   ├── time/
-│   │   ├── format/
+│   │   │   ├── localStorage.ts        # User prefs only (Zod-guarded)
+│   │   │   ├── indexedDB.ts           # Dexie schemas + degrade-to-memory
+│   │   │   └── persistence.service.ts # readSnapshot/writeSnapshot/clearAll + mediaBlobs LRU
+│   │   ├── query/
+│   │   │   └── usePersistentQuery.ts  # useQuery wrapper: IndexedDB hydrate + writeback
+│   │   ├── time/                      # (placeholder)
+│   │   ├── format/                    # (placeholder)
 │   │   └── env.ts                     # Zod-parsed VITE_* env
 │   │
 │   ├── shared/
 │   │   ├── types/
-│   │   │   ├── ids.ts                 # Branded ID types
-│   │   │   ├── dto.ts                 # Shared DTOs (zod-derived)
-│   │   │   └── ui.ts
+│   │   │   └── ids.ts                 # Branded ID types
+│   │   ├── state/
+│   │   │   ├── queryKeys.ts           # Central as-const query key factory
+│   │   │   └── currentUser.ts         # Cross-feature {id, displayName} accessor
 │   │   ├── hooks/
 │   │   ├── utils/
 │   │   └── constants/
@@ -198,16 +215,19 @@ The boot order is fixed. Every component subscribes downstream of guarantees mad
 
 ```
    ┌────────────────────────────────────────────────────────────┐
-   │ <AppProviders>                                             │
-   │   ├── <QueryProvider>      ← TanStack Query client         │
-   │   ├── <ThemeProvider>      ← reads pref, applies CSS vars  │
-   │   ├── <AuthProvider>       ← bootstraps access token       │
-   │   ├── <SocketProvider>     ← connects ONCE after auth      │
-   │   ├── <SyncController>     ← wires socket → caches         │
-   │   ├── <ToastProvider>                                      │
-   │   └── <AppRouter>          ← only NOW does routing start   │
+   │ <AppErrorBoundary>                                         │
+   │   <AppProviders>                                           │
+   │     <QueryProvider>      ← TanStack Query client           │
+   │       <ThemeProvider>    ← reads pref, applies CSS vars    │
+   │         <AuthProvider>   ← silent refresh; emits auth:ready│
+   │           <SocketProvider>  ← connects ONCE on auth:ready  │
+   │             <SyncController>  ← invokes registered handlers│
+   │               <ToastProvider>                              │
+   │                 <AppRouter>  ← only NOW does routing start │
    └────────────────────────────────────────────────────────────┘
 ```
+
+`ensureFeatureSyncRegistered()` is called once at module load in `App.tsx` and pushes each feature's handler into the `SyncController` registry. Handlers have the signature `(socket, queryClient) => () => void` and are invoked when the socket connects, torn down on disconnect or logout.
 
 **Why the socket lives above the router:** route changes (e.g. switching between two chats) must NOT tear down and rebuild the connection. Reconnects are expensive; missed events during a tear-down are unacceptable. The socket is bound to the user session, not the URL.
 
@@ -222,8 +242,11 @@ The boot order is fixed. Every component subscribes downstream of guarantees mad
 
 ### 4.2 Disconnect Resilience
 
-- On `disconnect`, the socket layer marks a `lastSeq` value per stream.
-- On `reconnect`, the client calls `GET /api/sync?since=<seq>` and merges the delta into the relevant caches before resuming live event consumption. Users see a brief "Reconnecting…" indicator, never a stale UI.
+- The `SocketProvider` binds `connect`/`disconnect`/`connect_error` on the socket and `reconnect_attempt`/`reconnect`/`reconnect_failed` on the `socket.io` manager.
+- A local `'io client disconnect'` (provider teardown, logout) does NOT flip status to reconnecting.
+- The "Reconnecting…" indicator is rendered by [`ConnectionBanner`](#) reading from a Zustand store (`idle | connecting | connected | reconnecting | offline`).
+- On successful manager reconnect, the provider emits `sync:resume` on the event bus.
+- **Sequence resume (`GET /api/sync?since=<seq>`)** — the event bus signal is in place; the resume endpoint is deferred to Phase 10 alongside the backend support.
 
 ---
 
@@ -252,18 +275,23 @@ The frontend has three distinct state layers, each with a clearly defined respon
 
 ### 5.1 Server State (TanStack Query)
 
-**Query key conventions** (all keys are tuples for type safety):
+**Query key conventions** (all keys are tuples for type safety, defined in `shared/state/queryKeys.ts`):
 
 ```ts
-const keys = {
-  chats:           (filters: ChatFilters)  => ['chats', filters] as const,
-  chat:            (id: ChatId)            => ['chat', id] as const,
-  messages:        (id: ChatId)            => ['messages', id] as const,
-  participants:    (id: ChatId)            => ['participants', id] as const,
-  sessions:        ()                      => ['sessions'] as const,
-  assignments:     ()                      => ['assignments'] as const,
-  me:              ()                      => ['me'] as const,
-};
+export const keys = {
+  me:                () => ['me'] as const,
+  chats:             (filters?: Readonly<Record<string, unknown>>) => ['chats', filters ?? {}] as const,
+  chat:              (chatId: ChatId) => ['chats', 'detail', chatId] as const,
+  messages:          (chatId: ChatId) => ['messages', chatId] as const,
+  message:           (chatId: ChatId, messageId: MessageId) => ['messages', chatId, messageId] as const,
+  assignments:       () => ['assignments'] as const,
+  assignmentsByUser: (userId: UserId) => ['assignments', 'user', userId] as const,
+  sessions:          () => ['sessions'] as const,
+  session:           (sessionId: SessionId) => ['sessions', sessionId] as const,
+  users:             () => ['users'] as const,
+  user:              (userId: UserId) => ['users', userId] as const,
+  feedback:          () => ['feedback'] as const,
+} as const;
 ```
 
 **Defaults that make socket-driven sync correct:**
@@ -287,31 +315,41 @@ Caches are mutated directly via `queryClient.setQueryData` from sync handlers an
 
 ### 5.2 Client State (Zustand)
 
-One store per feature, composed at the root:
+One store per feature, plus a slim `shared/state/currentUser.ts` accessor that any feature can read without crossing feature boundaries:
 
 ```ts
 // features/chats/store/chats.store.ts
-export const useChatsUIStore = create<ChatsUIState>()(
-  devtools(
-    immer((set) => ({
-      activeChatId: null,
-      filters: { unreadOnly: false, mutedHidden: false, /*...*/ },
-      selectedMessageIds: new Set<MessageId>(),
-      setActiveChat: (id) => set((s) => { s.activeChatId = id; }),
-      // ...
-    })),
-    { name: 'chats-ui' }
-  )
-);
+export const useChatsUIStore = create<ChatsUIState>((set) => ({
+  activeChatId: null,
+  filters: loadFilters(),                // hydrated from localStorage
+  search: '',
+  selectedChatIds: new Set<ChatId>(),
+  setActiveChatId: (id) => set({ activeChatId: id }),
+  setFilters: (patch) => set((prev) => {
+    const next = { ...prev.filters, ...patch };
+    writeLocal(FILTERS_KEY, next);       // persists through ChatFiltersSchema
+    return { filters: next };
+  }),
+  // ...
+}));
+
+// shared/state/currentUser.ts
+export const useCurrentUserStore = create<CurrentUserState>((set) => ({
+  user: null,
+  setUser: (user) => set({ user }),
+}));
+export const useCurrentUserId = () => useCurrentUserStore((s) => s.user?.id ?? null);
 ```
 
-Zustand slices NEVER hold server data. They hold the UI's interpretation of it (which chat is active, what's selected, what filters are applied). Selectors are colocated to keep components renderable from a single hook.
+Zustand slices NEVER hold server data — they hold the UI's interpretation of it (which chat is active, what's selected, what filters are applied). Selectors are colocated to keep components renderable from a single hook. `devtools` + `immer` middleware are not currently wired (re-introduce as the store count grows).
 
 ### 5.3 Persistent State
 
-- **localStorage:** filter preferences, theme, notification sound preference, last-opened chat.
-- **IndexedDB (Dexie):** last-known chat list snapshot, last-known message page per chat, decrypted media blobs (LRU, capped at 200 MB). On boot, these populate the TanStack cache instantly while the socket reconnects and reconciles.
-- **Access token:** memory only, NEVER persisted.
+- **localStorage** ([`lib/storage/localStorage.ts`](#)) — Zod-validated read/write wrapper for small preferences: theme, chat filters, per-chat composer drafts. Corrupt payloads are silently deleted and re-fetched.
+- **IndexedDB** ([`lib/storage/indexedDB.ts`](#) + [`persistence.service.ts`](#)) — Dexie v1 with two tables: `snapshots(&key, updatedAt)` for normalized DTOs and `mediaBlobs(&messageId, accessedAt, size)` for decrypted blobs (200 MB LRU eviction by `accessedAt`). Reads pass through Zod; schema drift drops the row. Writes are debounced 500 ms.
+- **Generic hook** ([`lib/query/usePersistentQuery.ts`](#)) — wraps `useQuery`; on mount, primes the cache from IndexedDB if empty; writes successful network results back debounced. Used today by the chats list.
+- **Access token:** memory only ([`lib/storage/memory.ts`](#)), NEVER persisted.
+- **Logout** triggers `clearAllPersistedData()` so the next user's session can't see the previous user's snapshots.
 
 ---
 
@@ -323,46 +361,62 @@ The sync engine is the heart of this architecture. It transforms socket events i
 
 ```ts
 // realtime/socket.ts
-let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
+let socket: AppSocket | null = null;
 
-export const getSocket = () => {
-  if (!socket) {
-    socket = io(env.VITE_BACKEND_URL, {
-      transports: ['websocket'],
-      autoConnect: false,
-      auth: (cb) => cb({ token: getAccessToken() }),
-    });
-  }
+export function getSocket(): AppSocket {
+  socket ??= io(env.VITE_SOCKET_URL, {
+    transports: ['websocket'],
+    autoConnect: false,
+    withCredentials: true,
+    auth: (cb) => cb({ token: getAccessToken() }),
+    ...RECONNECT_CONFIG,                    // reconnect cap 30s
+  });
   return socket;
-};
+}
 ```
 
-The `ServerToClientEvents` interface is generated from the backend's Zod event contract — frontend and backend share the same event vocabulary, statically.
+Event payloads are validated through [`events.contract.ts`](#) at runtime (`useSocketEvent` Zod-parses every incoming event — DEV throws on bad shape; prod logs `app:error` and drops). The contract mirrors the backend's `events.contract.ts` shape-for-shape.
 
 ### 6.2 Sync Controller
 
-A single React component, mounted above the router, registers per-feature handlers. Handlers are pure functions: `(event, queryClient, stores) => void`. They mutate caches and stores; they never render.
+A single component, mounted above the router, invokes the handlers that each feature registered at module load. Handlers have the signature `(socket, queryClient) => () => void`; they mutate caches and stores, they never render.
 
 ```ts
 // realtime/sync.controller.ts
-export const SyncController = () => {
-  const queryClient = useQueryClient();
+export type SyncHandler = (socket: AppSocket, queryClient: QueryClient) => () => void;
+
+const registry: SyncHandler[] = [];
+export function registerSyncHandler(handler: SyncHandler): void {
+  registry.push(handler);
+}
+
+export function SyncController({ children }: { children?: ReactNode }) {
   const socket = useSocket();
-
+  const queryClient = useQueryClient();
   useEffect(() => {
-    const handlers = [
-      registerChatsSync(socket, queryClient),
-      registerMessagesSync(socket, queryClient),
-      registerAssignmentsSync(socket, queryClient),
-      registerSessionsSync(socket, queryClient),
-      registerNotificationsSync(socket, queryClient),
-    ];
-    return () => handlers.forEach((unbind) => unbind());
+    if (!socket) return;
+    const teardown = registry.map((register) => register(socket, queryClient));
+    return () => { for (const t of teardown) t(); };
   }, [socket, queryClient]);
-
-  return null;
-};
+  return children ?? null;
+}
 ```
+
+Feature handlers are registered exactly once, at boot, via `app/sync/featureSync.ts`:
+
+```ts
+// app/sync/featureSync.ts
+let registered = false;
+export function ensureFeatureSyncRegistered(): void {
+  if (registered) return;
+  registered = true;
+  registerSyncHandler(registerChatsSync);
+  registerSyncHandler(registerMessagesSync);
+  // future: registerSessionsSync, registerAssignmentsSync, registerNotificationsSync
+}
+```
+
+`App.tsx` invokes `ensureFeatureSyncRegistered()` at module load before rendering. This pattern keeps the `SyncController` in `realtime/` agnostic to features (preserves boundaries-plugin isolation) while still giving features a single place to declare what they sync.
 
 ### 6.3 Channel-Keyed Routing
 
@@ -390,30 +444,35 @@ export const registerMessagesSync = (socket: AppSocket, qc: QueryClient) => {
 
 ### 6.4 Optimistic Mutations
 
-Sends, edits, deletes, and reactions all use TanStack Query mutations with optimistic cache updates:
+Sends, edits, deletes, and reactions use TanStack Query mutations with optimistic cache updates. Pure helpers live in `features/messages/optimistic/index.ts` so they can be tested without React:
 
 ```ts
-export const useSendMessage = (chatId: ChatId) => {
+export function useSendMessage(chatId: ChatId): UseSendMessageReturn {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: SendMessageInput) => messagesApi.send(chatId, input),
-    onMutate: async (input) => {
-      const tempId = makeTempId();
-      const optimistic: PendingMessage = { ...input, id: tempId, status: 'pending', ts: Date.now() };
-      qc.setQueryData(keys.messages(chatId), (prev) => appendOptimistic(prev, optimistic));
+  const userId = useCurrentUserId();
+  const mutation = useMutation({
+    mutationFn: ({ input, tempId }) => messagesApi.send(chatId, input, tempId),
+    onMutate: ({ input, tempId }) => {
+      if (!userId) return { tempId };
+      const optimistic = buildPending(chatId, userId, input, tempId);
+      qc.setQueryData(keys.messages(chatId), (data) => appendOptimistic(data, optimistic));
       return { tempId };
     },
-    onSuccess: (server, _input, ctx) => {
-      qc.setQueryData(keys.messages(chatId), (prev) => reconcile(prev, ctx!.tempId, server));
+    onSuccess: (server, vars) => {
+      qc.setQueryData(keys.messages(chatId), (data) => reconcileSend(data, vars.tempId, server));
     },
-    onError: (_e, _input, ctx) => {
-      qc.setQueryData(keys.messages(chatId), (prev) => markFailed(prev, ctx!.tempId));
+    onError: (_err, vars) => {
+      qc.setQueryData(keys.messages(chatId), (data) => markFailed(data, vars.tempId));
     },
   });
-};
+  return {
+    send: async (input) => { await mutation.mutateAsync({ input, tempId: makeTempId() }); },
+    isSending: mutation.isPending,
+  };
+}
 ```
 
-**Reconciliation rule:** when the corresponding `message:new` socket event arrives (echoed back from WAHA via the backend), the sync handler matches by stanza ID and de-duplicates with the optimistic entry. There is exactly one rendered message in the end.
+**Reconciliation rule:** when the corresponding `message:new` socket event arrives (echoed back from WAHA via the backend), `applyMessageNew` dedupes by id; the send mutation reconciles by `tempId`. Either way there is exactly one rendered message in the end.
 
 ### 6.5 Event Bus
 
@@ -673,21 +732,22 @@ No `any`, no `as` casts outside type-guard functions and Zod parsers. ESLint enf
 
 The app is not a strict offline app — it cannot send messages without a connection — but it degrades gracefully.
 
-| Scenario | Behavior |
-|---|---|
-| Cold start, recently online | Hydrate from IndexedDB snapshot for instant UI, then reconcile from network |
-| Mid-session disconnect | Banner: "Reconnecting…"; UI remains interactive; queued sends marked "pending" |
-| Long disconnect | On reconnect, `GET /api/sync?since=<seq>` replays missed events |
-| Failed send | Message shows red status, retry button; user can edit and retry |
-| Stale media | Decrypted blobs cached in IndexedDB with LRU eviction at 200 MB |
+| Scenario | Status | Behavior |
+|---|---|---|
+| Cold start, recently online | ✅ | Hydrate from IndexedDB snapshot via `usePersistentQuery` for instant UI, then reconcile from network |
+| Mid-session disconnect | ✅ | `ConnectionBanner` shows "Reconnecting…"; UI remains interactive |
+| Long disconnect — sequence resume | ⏳ Phase 10 | `sync:resume` event hook is wired; `GET /api/sync?since=<seq>` endpoint TBD |
+| Failed send | ✅ | Bubble status flips to `failed`; "Failed — retry" affordance present |
+| Stale media | ⏳ | Dexie `mediaBlobs` LRU is in place; `useDecryptMedia` hook not yet implemented |
+| Queued sends while `navigator.onLine === false` | ⏳ Phase 10 | Offline queue + retry on `online` |
 
-A small service worker handles asset caching and a fallback offline page. It does not intercept API calls — that road leads to stale-state bugs.
+A service worker for asset caching is queued for Phase 12; today the app does not register one.
 
 ---
 
-## 12. Notifications
+## 12. Notifications ⏳ Phase 10
 
-Centralized notification orchestration in `features/notifications/notification.service.ts`:
+`features/notifications/` is a stub today. The target shape — `NotificationService` listening on the event bus, gated by chat-mute / active-chat / focus / global-sound / permission — is unchanged from the original spec below. Implementation lands in Phase 10 alongside the settings screen and favicon badge.
 
 ```ts
 class NotificationService {
@@ -705,34 +765,34 @@ class NotificationService {
 }
 ```
 
-The service subscribes to `eventBus.on('message:received')` so notification logic stays decoupled from sync logic. Sounds, badges, and toasts are independent concerns that can be disabled individually.
+The service will subscribe to a `message:received` event on the bus so notification logic stays decoupled from sync logic. Sounds, badges, and toasts will be independent concerns that can be disabled individually.
 
 ---
 
-## 13. Observability (Frontend)
+## 13. Observability (Frontend) ⏳ Phase 11
 
-Production frontends are silently broken until you measure them.
+Today the app ships an `AppErrorBoundary` + per-route `RouteErrorBoundary` and a typed `AppApiError` mapper, but no Sentry/Web Vitals/beacon wiring. The target below is the Phase 11 deliverable.
 
-- **Error tracking** via Sentry: every unhandled rejection, every error boundary trip, every failed mutation. PII redacted at the source.
-- **Performance metrics** via the Web Vitals API: LCP, INP, CLS reported per-route.
+- **Error tracking** via Sentry: every unhandled rejection, every error boundary trip, every failed mutation. PII redacted at the source via `beforeSend`.
+- **Performance metrics** via the Web Vitals API: LCP, INP, CLS, TTFB reported per-route via `navigator.sendBeacon`.
 - **Custom metrics:** socket reconnection rate, optimistic-reconcile divergence count, query-cache hit/miss ratio, time-to-first-message-render after route mount.
-- **Correlation:** every HTTP request carries an `X-Correlation-Id` header echoed in Sentry breadcrumbs so a frontend error can be matched to backend logs.
+- **Correlation:** every HTTP request will carry an `X-Correlation-Id` header echoed in Sentry breadcrumbs so a frontend error can be matched to backend logs.
 - **Debug overlay** (dev only): `Cmd+Shift+D` opens a panel showing socket state, last 50 events, active queries, and cache snapshots.
 
 ---
 
 ## 14. Testing Strategy
 
-| Layer | Tool | Scope |
-|---|---|---|
-| Unit | Vitest | Pure functions, reducers, optimistic/reconcile logic, Zod parsers |
-| Component | Vitest + React Testing Library | Individual components in isolation, with mocked queries |
-| Integration | Vitest + MSW | Full feature flows with mocked network + simulated socket events |
-| Visual | Storybook + Chromatic | Every primitive and key compound component |
-| E2E | Playwright | Login → open chat → send message → receive ack |
-| Accessibility | axe-core in component tests | Zero violations on rendered components |
+| Layer | Tool | Status | Scope |
+|---|---|---|---|
+| Unit | Vitest | ✅ | Pure functions, optimistic/reconcile logic, Zod parsers, stores |
+| Component | Vitest + RTL | ✅ | Individual components in isolation (primitives, composer, banner, …) |
+| Integration | Vitest + MSW | ✅ | Refresh queue, login flow, optimistic mutations, composer submit |
+| Visual | Storybook + Chromatic | 🟡 | Storybook present; Chromatic wiring in Phase 12 |
+| E2E | Playwright | ⏳ | Phase 12 — golden-path flows |
+| Accessibility | `vitest-axe` + Storybook a11y | ✅ | Primitives + compounds covered; full per-route sweep in Phase 10 |
 
-Coverage thresholds (line/branch): 75% for `features/*`, 90% for `realtime/*` and `lib/*`. Coverage is a floor; meaningful assertions are the actual bar.
+Today: **137 tests pass across 34 files**. Coverage thresholds (line/branch — 75% for `features/*`, 90% for `realtime/*` and `lib/*`) are not yet gated in CI; the gate lands in Phase 12. Coverage is a floor; meaningful assertions are the actual bar.
 
 ---
 

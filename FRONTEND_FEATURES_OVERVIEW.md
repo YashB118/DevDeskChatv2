@@ -1,287 +1,309 @@
 # Frontend Features Overview
 
-DevChatDesk frontend is a React 19 + Vite single-page application that provides a shared WhatsApp inbox UI for internal development teams. It supports two roles — **Admin** and **Developer** — with role-gated routing and feature access throughout.
+DevChatDesk frontend is a React 19 + Vite single-page application that provides a shared WhatsApp inbox UI for internal development teams. Two roles — **Admin** and **Developer** — with role-gated routing and feature access throughout.
+
+> **Status snapshot.** This document tracks **what is actually shipped today** vs. what remains. Phases 1–8 from `FRONTEND_IMPLEMENTATION_PLAN.md` are merged; Phases 9–12 (admin features, polish, observability, deployment) are not yet built. Each section below carries a status pill: **✅ Shipped**, **🟡 Partial**, **⏳ Deferred**.
 
 ---
 
-## 1. Authentication
+## 1. Authentication ✅ Shipped
 
 ### Login
-- Email/password login form.
-- JWT access token stored in memory (never localStorage) for security.
-- Refresh token stored in an HTTP-only cookie; auto-refreshed on expiry via axios interceptor.
-- Redirects to role-appropriate dashboard on success.
+- Email/password login form ([features/auth/components/LoginForm.tsx](frontend/src/features/auth/components/LoginForm.tsx)) via React Hook Form + Zod resolver.
+- JWT access token stored in memory only ([lib/storage/memory.ts](frontend/src/lib/storage/memory.ts)) — never persisted.
+- Refresh token kept in HTTP-only cookie; silent refresh on `401` via axios interceptor in [lib/http/client.ts](frontend/src/lib/http/client.ts) + concurrent-request queue in [lib/http/retry.ts](frontend/src/lib/http/retry.ts).
+- Redirects to `/dashboard` on success and honors `state.from` for deep-link bounce-back.
 
 ### Route Guards
-- `ProtectedRoute` — blocks unauthenticated users, redirects to `/login`.
-- `AdminRoute` — blocks non-admin users from admin pages.
-- `PublicRoute` — redirects already-authenticated users away from `/login`.
-- `RootRedirect` — sends users to `/dashboard` or `/admin` based on role.
+- [ProtectedRoute](frontend/src/app/router/guards/ProtectedRoute.tsx) — blocks unauthenticated → `/login`.
+- [AdminRoute](frontend/src/app/router/guards/AdminRoute.tsx) — non-admin → `/dashboard`.
+- [PublicRoute](frontend/src/app/router/guards/PublicRoute.tsx) — authenticated → `/dashboard`.
+- [RootRedirect](frontend/src/app/router/guards/RootRedirect.tsx) — `/` routes by role.
+- Every guard waits on auth `initializing` status via [BootGate](frontend/src/app/ui/BootGate.tsx).
 
 ### Logout
-- Clears access token from memory, calls logout endpoint to invalidate refresh token cookie.
+- Manual logout in [useAuth.ts](frontend/src/features/auth/hooks/useAuth.ts) clears the in-memory token, resets auth state, **calls `clearAllPersistedData()` to wipe Dexie**, clears the cross-feature `currentUser` store, and emits `auth:logged-out` on the event bus (closing the socket).
 
 ### Password Change
-- Both admins and developers can change their own passwords from within the app.
+- [PasswordChangeForm](frontend/src/features/auth/components/PasswordChangeForm.tsx) accessible from `/settings`.
 
 ---
 
-## 2. Chat List Sidebar
+## 2. Routing & App Shell ✅ Shipped
 
-The left panel shows all WhatsApp conversations accessible to the logged-in user.
-
-### Chat List Display
-- Shows each chat with avatar, contact name, last message preview, timestamp, and unread count badge.
-- Phone numbers are never shown; fallback display name is "Contact".
-- Timestamps use 12-hour AM/PM format.
-- Group chats display group name and last sender.
-
-### Session Switcher
-- Dropdown to switch between active WAHA sessions (WhatsApp numbers).
-- Filters the chat list to conversations belonging to the selected session.
-
-### Filtering & Search
-- Real-time search by contact name or message content.
-- Filter dialog with persistent options (stored in localStorage):
-  - Show unread only
-  - Show assigned to me only
-  - Show muted / unmuted chats
-  - Show groups / individual chats
-
-### Pagination
-- Infinite scroll loads additional chats as user scrolls down.
-
-### Context Menu
-- Right-click on a chat to access quick actions:
-  - Assign chat to a developer (admin only)
-  - Mute / unmute chat
-  - Mark as read
-
-### Mark as Read
-- Marks a chat's unread count to zero, persisted via API.
-
-### Mute Toggle
-- Per-chat mute silences desktop notifications for that conversation.
-
-### Real-Time Updates
-- New incoming messages update the chat's last-message preview and unread count live without page reload.
-- Chat order re-sorts to surface the most recently active conversation.
-- Assignment changes appear instantly (assigned/unassigned events).
+- React Router 7 data router ([AppRouter](frontend/src/app/router/AppRouter.tsx)).
+- Typed route table in [routes.ts](frontend/src/app/router/routes.ts) — builders consume branded `ChatId`.
+- Admin code-split via [lazyRoutes.ts](frontend/src/app/router/lazyRoutes.ts) + `<Suspense fallback={<BootGate />}>` — verified in `dist/.vite/manifest.json`.
+- Per-route [RouteErrorBoundary](frontend/src/app/router/RouteErrorBoundary.tsx).
+- `viewTransition` enabled on `<NavLink>` for smooth route changes where supported.
+- 404 page for unknown routes.
 
 ---
 
-## 3. Chat Window
+## 3. Chat List Sidebar 🟡 Partial
 
-The right panel for reading and replying to a selected conversation.
+The middle column in [DashboardLayout](frontend/src/app/router/layouts/DashboardLayout.tsx) ([ChatSidebar](frontend/src/features/chats/components/ChatSidebar/ChatSidebar.tsx)).
 
-### Message List
-- Virtualized with `react-virtuoso` for smooth performance with large histories.
-- Infinite scroll pagination (loads older messages upward).
-- Messages grouped by date dividers.
-- Scroll-to-bottom button appears when user has scrolled up.
-- Auto-scrolls to bottom on new incoming messages when already at bottom.
+### Chat List Display ✅
+- Avatar (image + initials fallback), title, last message preview, timestamp, unread count [Badge](frontend/src/design-system/primitives/Badge), mute glyph.
+- Phone numbers never shown; default title from the DTO.
 
-### Message Composer
-- Multi-line text input with `Enter` to send, `Shift+Enter` for newline.
-- Emoji picker integration for inserting emoji.
-- `@mention` support for tagging group participants (autocomplete dropdown).
-- Reply-to-message (quoted reply) — click Reply on any message to set context.
-- Media attachment upload (images, videos, audio, documents).
-- Caption field for media messages.
-- Pending message optimistic UI — sent message appears immediately with a "pending" indicator while in transit.
+### Session Switcher ⏳
+- [SessionSwitcher](frontend/src/features/chats/components/SessionSwitcher/SessionSwitcher.tsx) is a placeholder dropdown — the full sessions feature (live WAHA list) lands in Phase 9.
 
-### Message Editing
-- Inline edit for sent text messages.
-- Edited indicator shown on the message bubble.
+### Filtering & Search ✅
+- Real-time client-side search ([ChatSearchBar](frontend/src/features/chats/components/ChatSearchBar/ChatSearchBar.tsx)) over title + last-message preview.
+- Filter toggles ([ChatFilters](frontend/src/features/chats/components/ChatFilters/ChatFilters.tsx)) persisted to `localStorage` via [lib/storage/localStorage.ts](frontend/src/lib/storage/localStorage.ts) and Zod-validated on read: unread only, assigned to me, hide muted (+ chat-kind whitelist).
 
-### Message Deletion
-- Delete own messages; deleted messages show "This message was deleted" placeholder.
+### Pagination ✅
+- Virtualized infinite scroll with `react-virtuoso` and cursor pagination in [useChatList.ts](frontend/src/features/chats/hooks/useChatList.ts).
 
-### Message Reactions
-- Emoji reaction picker on each message.
-- Reactions shown as an emoji strip below the message bubble with per-sender attribution.
-- Toggle off own reaction by clicking it again.
+### Context Menu ✅ (Radix dropdown surface)
+- [ChatContextMenu](frontend/src/features/chats/components/ChatContextMenu/ChatContextMenu.tsx) — mark-read, mute/unmute. Assign action exists in [useChatActions.ts](frontend/src/features/chats/hooks/useChatActions.ts); UI surface lands with admin features (Phase 9). Native right-click binding is queued for Phase 10 UX pass.
 
-### Reply / Quoted Message
-- Displays quoted original message inside the reply bubble.
-- Tapping quoted block scrolls to the original message.
+### Mark as Read / Mute Toggle ✅
+- Optimistic mutations in [useChatActions.ts](frontend/src/features/chats/hooks/useChatActions.ts) with snapshot rollback on failure.
 
-### In-Chat Search
-- Search bar to find messages within the current conversation.
-- Highlights matches; navigate through results with prev/next arrows.
-- Scroll-to-message on result selection.
+### Real-Time Updates ✅
+- [chats.sync.ts](frontend/src/features/chats/sync/chats.sync.ts) handles `message:new`, `chat:assigned`, `chat:unassigned`, `chat:read`, `chat:muted` — every handler `setQueryData` mutates the cache, never refetches. Pure helpers in [chats.mutations.ts](frontend/src/features/chats/sync/chats.mutations.ts) (`bumpChatWithMessage`, `applyAssigned/Unassigned/Read/Muted`).
 
-### Chat Header
-- Shows contact name, avatar, and online/last-seen status where available.
-- Links to contact profile / group info dialog.
-
-### Profile & Contact Dialog
-- View contact details (name, phone number hidden per convention, avatar).
-- View group participants list for group chats.
-
-### Forward Dialog
-- Forward a received message to another chat in the inbox.
-
-### Assign Dialog
-- Admin can reassign the current chat to a different developer from inside the chat window.
-
-### Mute Toggle
-- Mute/unmute the current chat directly from the chat window header.
+### Cache Hydration ✅
+- First page of the chat list persists to IndexedDB and re-hydrates instantly on reload via [usePersistentQuery](frontend/src/lib/query/usePersistentQuery.ts) + [persistence.service.ts](frontend/src/lib/storage/persistence.service.ts).
 
 ---
 
-## 4. Message Bubbles
+## 4. Chat Window 🟡 Partial
 
-Each message is rendered by `MessageBubble` with format-aware display.
+[ChatPage](frontend/src/app/router/pages/ChatPage.tsx) hosts the right column.
+
+### Message List ✅
+- Reverse-virtualized [MessageList](frontend/src/features/messages/components/MessageList/MessageList.tsx) (`react-virtuoso` w/ `followOutput="auto"`, stable per-row `computeItemKey`).
+- Day dividers injected at render time.
+- `startReached` triggers `useInfiniteQuery.fetchNextPage` for older pages.
+- Empty / error / loading states via [EmptyState](frontend/src/design-system/compounds/EmptyState) + [Spinner](frontend/src/design-system/primitives/Spinner).
+
+### Message Composer ✅ (text)
+- [MessageComposer](frontend/src/features/messages/components/MessageComposer/MessageComposer.tsx) — Textarea + `Enter` submits, `Shift+Enter` inserts newline, IME-safe via `nativeEvent.isComposing`.
+- Per-chat draft auto-saved (300ms debounce) to localStorage via [messages.store.ts](frontend/src/features/messages/store/messages.store.ts).
+- Local component state isolates keystrokes from list re-renders.
+- Restores text in the composer on send failure.
+
+### Composer extras ⏳ (deferred)
+- Emoji picker, media upload dialog, `@mention` autocomplete, quoted-reply selector UI, forward dialog — all pending. The reply preview rendering ([MessageQuotedPreview](frontend/src/features/messages/components/MessageQuotedPreview/MessageQuotedPreview.tsx)) is shipped, but selecting the reply target from the UI is not yet wired.
+
+### Optimistic Send / Edit / Delete / React ✅
+- All four implemented in [useMessageMutations.ts](frontend/src/features/messages/hooks/useMessageMutations.ts). Pure helpers in [optimistic/index.ts](frontend/src/features/messages/optimistic/index.ts): `makeTempId`, `buildPending`, `appendOptimistic`, `reconcileSend`, `markFailed`, `applyAck`, `applyEdit`, `applyDelete`, `applyReaction`.
+- Reconciliation: when the echoed `message:new` socket event arrives, the messages sync handler dedupes by id; the send mutation reconciles by `tempId`. Exactly one rendered bubble.
+
+### Message Reactions ✅
+- [MessageReactions](frontend/src/features/messages/components/MessageReactions/MessageReactions.tsx) — emoji strip with count rollup, `aria-pressed` on mine, toggle off by re-clicking.
+
+### Reply / Quoted Message ✅ (render only)
+- Quoted block rendered inside the bubble. Scroll-to-original-on-tap not yet wired.
+
+### In-Chat Search 🟡
+- [MessageSearch](frontend/src/features/messages/components/MessageSearch/MessageSearch.tsx) input is wired; matches highlighted via `<mark>` in [MessageBubble](frontend/src/features/messages/components/MessageBubble/MessageBubble.tsx). Prev/next-match navigation pending (Phase 10).
+
+### Chat Header ✅ (skeleton)
+- Title currently shows the raw `chatId`; participant DTO + avatar enrichment pending once the backend endpoint lands.
+
+### Profile / Contact / Assign / Forward Dialogs ⏳
+- All deferred. The `chatsApi.assign` and `messagesApi.forward` API methods exist; the dialogs do not.
+
+### Mute Toggle (from chat header) ⏳
+- Currently only available from the chat list context menu.
+
+---
+
+## 5. Message Bubbles ✅ (text), ⏳ (media)
+
+[MessageBubble](frontend/src/features/messages/components/MessageBubble/MessageBubble.tsx).
 
 ### Supported Message Types
-| Type | Display |
+| Type | Status |
 |---|---|
-| TEXT | Plain text, with linkification |
-| IMAGE | Thumbnail with tap-to-expand lightbox; caption shown below |
-| VIDEO | Video player with caption |
-| AUDIO | Audio player (waveform-style) |
-| DOCUMENT | File icon, file name, download link; caption if present |
-| STICKER | Rendered as image, no background bubble |
-| SYSTEM | Centered gray pill (e.g., "You were added") |
+| TEXT | ✅ Plain text rendering with search-match highlight. Linkification deferred. |
+| IMAGE / VIDEO / AUDIO / DOCUMENT / STICKER | ⏳ Bubble renders the `body` text; media UI (lightbox, player, download) lands alongside WAHA media. |
+| SYSTEM | ✅ Centered muted pill. |
 
-### Media Lazy Decryption
-- Encrypted media (WAHA NOWEB) is decrypted on-demand when the message scrolls into view.
-- Decrypted blobs are cached in memory to avoid re-decryption.
+### Media Lazy Decryption ⏳
+- Dexie `mediaBlobs` table + `putMediaBlob`/`getMediaBlob` helpers shipped in [persistence.service.ts](frontend/src/lib/storage/persistence.service.ts) (200MB LRU eviction by `accessedAt`). The `useDecryptMedia(messageId)` hook is queued for Phase 10.
 
-### Message Status (ACK)
-- Outbound messages show delivery/read receipt ticks (sent / delivered / read).
+### Message Status (ACK) ✅
+- Outbound bubbles show `Check`/`CheckCheck` for SENT / DELIVERED / READ / PLAYED — READ/PLAYED tinted with the accent color.
 
-### Forwarded Label
-- Messages forwarded from another chat display a "Forwarded" label.
+### Forwarded Label ✅
+- "Forwarded" pill when `message.forwarded === true`.
 
-### Direction
-- Outbound (fromMe) messages align right with distinct background.
-- Inbound messages align left.
+### Direction & Sender Name ✅
+- `senderId === currentUserId` drives mine-vs-other alignment + bubble color.
+- Sender name shown above the bubble when present (group chats).
 
-### Sender Name in Groups
-- Group messages show sender's display name above the bubble.
+### Pending / Failed States ✅
+- `status: 'pending'` shows an inline ellipsis; `status: 'failed'` shows a "Failed — retry" button.
 
----
+### Deleted Tombstone ✅
+- Deleted bubbles render *"Message deleted"* in muted italic.
 
-## 5. Real-Time Notifications
-
-### Desktop Notifications
-- Browser push notifications for new messages when the app is in background or a different chat is open.
-- Notification includes sender name and message preview.
-- Muted chats do not trigger notifications.
-- Own sent messages never trigger notifications.
-
-### Unread Count Badge
-- Tab/favicon unread badge increments on new messages.
-
-### Toast Notifications
-- In-app toasts (via `sonner`) for events like chat assignment, session status changes, and errors.
+### Edited Timestamp ✅
+- "edited" label appears in the footer when `editedAt` is set.
 
 ---
 
-## 6. Admin Dashboard
+## 6. Real-Time Core ✅ Shipped
 
-Separate `/admin` route with an icon-based sidebar for navigation between panels.
+- Singleton Socket.IO client ([realtime/socket.ts](frontend/src/realtime/socket.ts)) — `transports: ['websocket']`, `autoConnect: false`, `withCredentials: true`, auth callback reads the in-memory token (so rotated tokens flow into reconnects for free), spreads [RECONNECT_CONFIG](frontend/src/realtime/reconnect.ts) (30 s cap).
+- [SocketContext](frontend/src/realtime/SocketContext.tsx) mounted in [AppProviders](frontend/src/app/providers/AppProviders.tsx) **above** `<AppRouter>` — route changes never tear down the connection. Opens on `auth:ready`, closes on `auth:logged-out`. Local `'io client disconnect'` does NOT flip status to reconnecting.
+- [connectionStatusStore.ts](frontend/src/realtime/connectionStatusStore.ts) (Zustand): `idle | connecting | connected | reconnecting | offline`. Surfaced by [ConnectionBanner](frontend/src/realtime/ConnectionBanner.tsx) inside [DashboardLayout](frontend/src/app/router/layouts/DashboardLayout.tsx) + [AdminLayout](frontend/src/app/router/layouts/AdminLayout.tsx).
+- Typed [useSocketEvent](frontend/src/realtime/useSocketEvent.ts) — Zod-validates payloads against [events.contract.ts](frontend/src/realtime/events.contract.ts); DEV throws on bad shape, prod logs `app:error` and drops.
+- Typed event bus ([eventBus.ts](frontend/src/realtime/eventBus.ts), mitt-backed): `auth:ready`, `auth:logged-out`, `sync:resume`, `app:error`.
+- [SyncController](frontend/src/realtime/sync.controller.ts) accepts handlers of shape `(socket, queryClient) => () => void` and tears them down on socket teardown. Central registration in [app/sync/featureSync.ts](frontend/src/app/sync/featureSync.ts) — invoked once at boot from [App.tsx](frontend/src/App.tsx) — wires `registerChatsSync` and `registerMessagesSync`.
+- On manager reconnect, the provider emits `sync:resume` on the event bus. The `GET /api/sync?since=<seq>` resume endpoint is queued for Phase 10 (the event hook is in place).
 
-### Session Management Panel
-- List all WAHA sessions with status indicators (WORKING, STOPPED, SCAN_QR_CODE, etc.).
-- Start / stop / delete sessions.
-- Create new sessions.
+### Outbound events covered by Zod schemas
+`pong`, `error:invalid_payload`, `message:new`, `message:ack`, `message:edited`, `message:deleted`, `message:reaction`, `chat:assigned`, `chat:unassigned`, `chat:read`, `chat:muted`.
 
-### QR Code Panel
-- Displays live QR code (SVG, format=raw) for scanning with WhatsApp to activate a session.
-- Auto-refreshes when session status changes to SCAN_QR_CODE via socket events.
-
-### Chat Assignment Panel
-- View all chats across all sessions.
-- Assign any chat to a developer.
-- Unassign chats.
-- See current assignee per chat.
-
-### Developer Management Panel
-- Create, edit, enable, and disable developer accounts.
-- Role-based: admins can manage all user accounts.
-
-### Feedback Viewing Panel
-- View feedback submitted by developers.
-- Read/unread status management.
-
-### Global Mute Toggle
-- Single toggle to mute all notification sounds globally across the admin account.
-
-### Admin Chat View
-- Admins can read any chat regardless of assignment.
-- Admins see a read-only indicator for chats not assigned to themselves.
+### Inbound events
+`ping`, `chats:join`, `chats:leave` (mirroring the backend contract; backend wiring lands when feature endpoints come online).
 
 ---
 
-## 7. Developer Dashboard
+## 7. Notifications, Sound, Favicon ⏳ Deferred
 
-The primary `/dashboard` route for developers.
-
-### Assigned Chats Only
-- Chat list shows only chats assigned to the logged-in developer.
-- Assignment changes reflected instantly via socket.
-
-### Full Messaging
-- All composer, reaction, edit, delete, and media features available.
-
-### Notification Awareness
-- Notifications only for assigned chats; background chats in the assigned set still update live.
+Phase 10 work. The `features/notifications/` folder is a stub (`index.ts` only). The event bus already exposes a `message:received` shape via the chats sync hook surface; the notification service is not yet implemented.
 
 ---
 
-## 8. WAHA Session Status Monitoring
+## 8. Admin Dashboard ⏳ Deferred
 
-- Frontend polls WAHA session status at intervals.
-- Session banner in the chat list sidebar warns when the WhatsApp session is disconnected or requires re-scanning.
-- Status transitions (WORKING → STOPPED → SCAN_QR_CODE) update live via socket events.
+The `/admin` route, [AdminLayout](frontend/src/app/router/layouts/AdminLayout.tsx), and lazily-loaded placeholder pages ([pages/admin/](frontend/src/app/router/pages/admin/)) ship today, but every panel is a stub:
 
----
+| Panel | Status |
+|---|---|
+| Session Management | ⏳ Stub page; full feature in Phase 9 |
+| QR Code Panel | ⏳ Pending |
+| Chat Assignment Panel | ⏳ Pending (mutation hook exists in `useChatActions.assign`) |
+| Developer Management Panel | ⏳ Pending |
+| Feedback Viewing Panel | ⏳ Pending |
+| Global Mute Toggle | ⏳ Pending |
+| Admin Chat View (read any chat) | ⏳ Pending (backend dependency) |
 
-## 9. Feedback
-
-### Submit Feedback
-- Developers can submit feedback/bug reports via `FeedbackForm`.
-
-### View Own Feedback
-- Developers see their own submission history in `MyFeedbackLog`.
-
----
-
-## 10. User Preferences
-
-- Per-user preferences stored via API (e.g., notification sounds on/off).
-- Preferences persist across sessions.
+The admin chunk IS code-split today (verified in `dist/.vite/manifest.json`) so non-admins never download this code.
 
 ---
 
-## 11. API & Data Layer
+## 9. Developer Dashboard ✅ Shipped (with caveats)
+
+- `/dashboard` is the primary route ([DashboardLayout](frontend/src/app/router/layouts/DashboardLayout.tsx)), grid: nav | chat sidebar | message outlet.
+- "Assigned to me" filter exists in the chat-list filter panel; server enforcement comes online when the backend `/api/chats` endpoint ships.
+- Full text-message composer + reactions + edit/delete available.
+
+---
+
+## 10. WAHA Session Status Monitoring ⏳ Deferred
+
+Phase 9. The connection-status banner ([ConnectionBanner](frontend/src/realtime/ConnectionBanner.tsx)) is shipped for the SOCKET, but the WAHA-session-status banner is a separate concern that lives in `features/sessions/` (currently a stub).
+
+---
+
+## 11. Feedback ⏳ Deferred
+
+`features/feedback/` is a stub. Submission + viewing UI lands in Phase 9.
+
+---
+
+## 12. User Preferences 🟡 Partial
+
+- Theme preference persisted to localStorage with a synchronous bootstrap script in `index.html` ([public/theme-bootstrap.js](frontend/public/theme-bootstrap.js)) — no FOUC.
+- Chat filter preferences persisted to localStorage via [localStorage.ts](frontend/src/lib/storage/localStorage.ts) (Zod-validated on read).
+- Composer drafts persisted per-chat to localStorage.
+- The full Settings screen (notification toggles, sound preference, language placeholder) is Phase 10.
+
+---
+
+## 13. API & Data Layer ✅ Shipped
 
 ### Axios Client
-- Single axios instance with base URL from `VITE_BACKEND_URL`.
-- Request interceptor attaches Bearer access token.
-- Response interceptor handles 401s: attempts silent token refresh, then retries the original request; logs out if refresh fails.
+- Singleton in [lib/http/client.ts](frontend/src/lib/http/client.ts), `baseURL = env.VITE_API_BASE_URL`, `withCredentials: true`.
+- Request interceptor attaches the in-memory `Bearer` token.
+- Response interceptor handles `401` via [retry.ts](frontend/src/lib/http/retry.ts) — coalesces concurrent failures behind a single in-flight refresh promise, retries the original request, logs out on refresh failure.
+- Backend error envelope `{ error: { code, message, correlationId } }` → typed [AppApiError](frontend/src/lib/http/errors.ts).
 
 ### TanStack Query
-- All server state managed via TanStack Query v5.
-- Defaults: `staleTime: 30s`, `retry: 1`, `refetchOnWindowFocus: false`.
-- Cache update helpers (`updateChatListQuery`) mutate the in-memory cache directly on socket events to avoid full refetches.
+- Provider in [QueryProvider.tsx](frontend/src/app/providers/QueryProvider.tsx): `staleTime: Infinity`, `gcTime: 30min`, `refetchOnWindowFocus: false`, `refetchOnReconnect: false`, `retry: 1`, `mutations.retry: 0`. Socket-driven sync keeps the cache fresh, not time.
+- Central typed `keys` factory in [shared/state/queryKeys.ts](frontend/src/shared/state/queryKeys.ts) — all `as const` tuples.
 
 ### Infinite Queries
-- Chat list and message list use `useInfiniteQuery` for cursor-based pagination.
+- Chats list and per-chat messages both use `useInfiniteQuery` with cursor pagination.
+
+### IndexedDB Persistence
+- Dexie v1 in [lib/storage/indexedDB.ts](frontend/src/lib/storage/indexedDB.ts) — `snapshots(&key, updatedAt)` + `mediaBlobs(&messageId, accessedAt, size)`.
+- [persistence.service.ts](frontend/src/lib/storage/persistence.service.ts): `readSnapshot` (Zod on read, drops on drift), debounced `writeSnapshot` (500ms), `clearAllPersistedData()`, `putMediaBlob`/`getMediaBlob` w/ 200MB LRU eviction.
+- Generic [usePersistentQuery](frontend/src/lib/query/usePersistentQuery.ts) wrapper — primes the cache from IndexedDB on mount and writes successful results back.
+- Graceful degradation when IndexedDB is unavailable (logged once, memory-only).
+
+### Cross-Feature User State
+- [shared/state/currentUser.ts](frontend/src/shared/state/currentUser.ts) — a slim Zustand store holding the current user id + display name. Auth writes; other features read via `useCurrentUserId()`. Lets the messages feature stay isolated from the auth feature without breaking the boundaries plugin.
 
 ---
 
-## 12. Infrastructure & Configuration
+## 14. Design System ✅ Shipped
+
+- Tokens: CSS variables across `light`, `dark`, `high-contrast` themes in [design-system/tokens/themes/](frontend/src/design-system/tokens/themes/).
+- [ThemeProvider](frontend/src/design-system/theme/) sets `data-theme` on `<html>`; synchronous bootstrap script in `index.html` (`public/theme-bootstrap.js`) applies the saved theme before React mounts — no FOUC. SHA-pinning queued for Phase 11.
+- Primitives (Radix + class-variance-authority): Button, Input, Textarea, Dialog, Popover, Tooltip, Dropdown, Switch, Checkbox, Tabs, Toast, Avatar, Badge, Spinner, Skeleton.
+- Compounds: EmptyState, SectionHeader, Tag, IconButton.
+- Motion system in [design-system/motion/](frontend/src/design-system/motion/): reusable variants + `usePrefersReducedMotion` hook that collapses transitions to instant.
+- Storybook 8 with `addon-a11y` + theme toolbar; one story per primitive/compound.
+- Dev-only `/__styleguide` route renders every component for visual smoke.
+- Token-contrast Vitest suite enforces WCAG AA (21 cases).
+
+---
+
+## 15. Testing ✅ (foundation), 🟡 (coverage)
+
+- Vitest + React Testing Library + `vitest-axe`.
+- MSW shared server in [tests/mocks/server.ts](frontend/src/tests/mocks/server.ts), lifecycle wired in [tests/setup.ts](frontend/src/tests/setup.ts).
+- `fake-indexeddb/auto` powers persistence tests.
+- **137 tests pass** across 34 files (foundation, design system, HTTP/auth/refresh queue, router guards, real-time core, persistence, chats sync + store + actions, messages optimistic + composer interaction).
+- Playwright E2E and Chromatic visual regression are Phase 12.
+- Coverage thresholds (75% features, 90% realtime/lib) are not yet gated in CI.
+
+---
+
+## 16. Infrastructure & Configuration
 
 | Concern | Detail |
 |---|---|
-| UI Components | Radix UI primitives + class-variance-authority (shadcn-style) |
-| Styling | Tailwind CSS v4 via `@tailwindcss/vite` |
-| Animations | Framer Motion |
-| Virtualization | react-virtuoso for chat and message lists |
-| Toasts | sonner |
-| Emoji Picker | emoji-picker-react |
-| Environment | `VITE_BACKEND_URL`, `VITE_FEEDBACK_ENABLED` |
+| UI Components | Radix UI primitives + class-variance-authority |
+| Styling | Tailwind v4 via `@tailwindcss/vite` reading CSS-variable tokens |
+| Animations | Framer Motion + reduced-motion fallbacks |
+| Virtualization | `react-virtuoso` (chat list and message list) |
+| Realtime | `socket.io-client@4` |
+| HTTP | axios + Zod-parsed responses |
+| Persistence | Dexie (IndexedDB) + small localStorage wrapper |
+| Form validation | React Hook Form + Zod resolver |
+| Server state | TanStack Query v5 |
+| Client state | Zustand |
+| Tests | Vitest + RTL + MSW + `vitest-axe` + `fake-indexeddb` |
+| Env vars | `VITE_API_BASE_URL`, `VITE_SOCKET_URL`, `VITE_APP_ENV`, `VITE_SENTRY_DSN` (parsed via Zod in [lib/env.ts](frontend/src/lib/env.ts)) |
+
+---
+
+## 17. What's Deferred to Phases 9–12
+
+| Theme | Phase | What's missing |
+|---|---|---|
+| Admin features | 9 | Sessions panel, QR panel, assignments panel, user CRUD, feedback viewer, global mute |
+| Sessions monitoring | 9 | Live WAHA session list, QR refresh on `session:status` |
+| Notifications | 10 | Desktop notifications service, sound, favicon badge, permission banner, settings screen |
+| Offline send queue | 10 | `navigator.onLine` queue + retry on `online` |
+| Reduced-motion full audit | 10 | Already supported by the hook; full sweep + axe sweep pending |
+| Media handling | 10 (or w/ WAHA) | `useDecryptMedia`, MediaLightbox, MediaPlayer, MediaUploadDialog |
+| Composer extras | 10 | Emoji picker, mentions autocomplete, reply selector, forward dialog |
+| Observability | 11 | Sentry, Web Vitals beacons, custom metrics, debug overlay |
+| Hardening | 11 | Strict CSP w/ SHA-pinned bootstrap, bundle-size CI gate |
+| Testing maturity | 12 | Playwright E2E, Chromatic visual regression, coverage gates |
+| Deployment | 12 | Dockerfile, nginx config, preview environments, Lighthouse CI |
+
+Bundle today: **entry 891.70 KB raw / 275.37 KB gzipped**, admin chunk 1.76 KB raw / 0.69 KB gz. The 250 KB initial-JS budget will be enforced (and the bundle trimmed) in Phase 11.

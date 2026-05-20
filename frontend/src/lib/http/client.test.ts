@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { apiClient } from './client';
 import { AppApiError } from './errors';
 import { _resetRefreshState, registerRefreshHandler } from './retry';
@@ -8,13 +8,10 @@ import { server } from '@/tests/mocks/server';
 
 const base = 'http://localhost:3005';
 
-beforeAll(() => { server.listen({ onUnhandledRequest: 'error' }); });
 afterEach(() => {
-  server.resetHandlers();
   _resetRefreshState();
   clearAccessToken();
 });
-afterAll(() => { server.close(); });
 
 describe('apiClient interceptors', () => {
   it('attaches the in-memory token on requests', async () => {

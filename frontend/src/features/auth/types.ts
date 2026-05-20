@@ -1,12 +1,12 @@
 import { z } from 'zod';
 
-export const UserRoleSchema = z.enum(['admin', 'developer']);
+export const UserRoleSchema = z.enum(['ADMIN', 'DEVELOPER']);
 export type UserRole = z.infer<typeof UserRoleSchema>;
 
 export const UserSchema = z.object({
   id: z.string().min(1),
   email: z.string().email(),
-  name: z.string().min(1),
+  displayName: z.string().min(1),
   role: UserRoleSchema,
 });
 export type User = z.infer<typeof UserSchema>;
@@ -19,6 +19,7 @@ export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
 export const RefreshResponseSchema = z.object({
   accessToken: z.string().min(1),
+  user: UserSchema,
 });
 export type RefreshResponse = z.infer<typeof RefreshResponseSchema>;
 

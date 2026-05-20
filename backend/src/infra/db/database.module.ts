@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_CONFIG } from '@app/config/constants';
 import { type AppConfig } from '@app/config/env';
 import { buildDataSourceOptions } from './data-source-options';
+import { TransactionRunner } from './transactions';
 
 @Global()
 @Module({
@@ -12,6 +13,7 @@ import { buildDataSourceOptions } from './data-source-options';
       useFactory: (env: AppConfig) => buildDataSourceOptions(env),
     }),
   ],
-  exports: [TypeOrmModule],
+  providers: [TransactionRunner],
+  exports: [TypeOrmModule, TransactionRunner],
 })
 export class DatabaseModule {}

@@ -9,6 +9,8 @@ const baseEnv = {
   REDIS_URL: 'redis://localhost:6379',
   JWT_PRIVATE_KEY: DUMMY_PRIVATE_KEY,
   JWT_PUBLIC_KEY: DUMMY_PUBLIC_KEY,
+  WAHA_BASE_URL: 'http://localhost:3000',
+  WAHA_STORE_PATH: '/var/lib/waha/store.db',
 };
 
 describe('loadEnv', () => {

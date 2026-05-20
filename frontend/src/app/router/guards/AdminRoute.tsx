@@ -12,7 +12,7 @@ export function AdminRoute({ children }: AdminRouteProps): ReactElement {
   const { status, user } = useAuth();
 
   if (status === 'initializing') return <BootGate />;
-  if (user?.role !== 'admin') {
+  if (user?.role !== 'ADMIN') {
     return <Navigate to={routes.dashboard()} replace />;
   }
   return <>{children}</>;

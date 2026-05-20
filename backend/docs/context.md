@@ -10,11 +10,12 @@ DevChatDesk's backend is the single server that fronts a multi-tenant team Whats
 
 - Authentication, authorization, audit (✅ Phase 3).
 - Real-time fan-out to operator clients (✅ Phase 4).
-- Conversation, message, and assignment state (planned).
-- Background processing of WAHA webhooks (planned).
-- A read-only view of the WAHA NOWEB SQLite store (planned).
+- Background processing of WAHA webhooks (✅ Phase 7).
+- Resilience-wrapped WAHA HTTP client + read-only NOWEB SQLite reader (✅ Phase 6).
+- Conversation, message, and session state (✅ Phase 8).
+- Collaboration: assignments, mute, feedback (planned, Phase 9).
 
-Today the codebase has completed **Phase 1 — Foundation**, **Phase 2 — Persistence Layer**, **Phase 3 — Authentication**, and **Phase 4 — Real-time Core** of `BACKEND_IMPLEMENTATION_PLAN.md`. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, signs RS256 JWTs, rotates opaque refresh tokens with family-scoped reuse detection, writes append-only audit entries, accepts authenticated Socket.IO connections with Redis-adapter fan-out and a typed event contract, and returns a normalized error envelope for any unhandled path. All non-health HTTP routes sit under the `/api` global prefix.
+Completed phases of `BACKEND_IMPLEMENTATION_PLAN.md` today: **Phase 1 — Foundation**, **Phase 2 — Persistence Layer**, **Phase 3 — Authentication**, **Phase 4 — Real-time Core**, **Phase 5 — Queue Infrastructure**, **Phase 6 — External Integration: WAHA + SQLite Store**, **Phase 7 — Webhook Ingestion**, **Phase 8 — Domain Modules**. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, signs RS256 JWTs, rotates opaque refresh tokens with family-scoped reuse detection, writes append-only audit entries, accepts authenticated Socket.IO connections with Redis-adapter fan-out and a typed event contract, drives BullMQ queues through a Zod-validated worker harness, talks to WAHA through a per-method-circuit-breaker / TTL-cached / retried client, reads the NOWEB SQLite store read-only with per-session handles, ingests WAHA webhooks (HMAC-verified, immediately enqueued, normalized phone→LID, dispatched by event type), persists chats / messages / sessions with monthly-partitioned `messages`, reconciles outbound sends against the pending-message store, and emits typed `message:*` / `session:status` / `group:participants` events. All non-health HTTP routes sit under the `/api` global prefix.
 
 ## 2. Tech baseline
 
@@ -31,6 +32,10 @@ Today the codebase has completed **Phase 1 — Foundation**, **Phase 2 — Persi
 | Cache / coordination | Redis via `ioredis`; namespaced keys; `SET NX PX` distributed lock |
 | Health | `@nestjs/terminus` indicators for Postgres + Redis |
 | Auth | `@nestjs/jwt` (RS256 access tokens) + opaque refresh tokens, bcrypt cost 12, cookie via `cookie-parser` |
+| Background work | BullMQ via `@nestjs/bullmq` (dedicated ioredis connection per worker, exponential retry, jobId-based idempotency, Zod-validated payloads through `WorkerHarness`) |
+| External: WAHA | `axios` client wrapped by `WahaService` (per-method `CircuitBreaker`, `TtlCache` for sessions/status/chats, idempotent-GET retry, request timeouts) |
+| External: NOWEB store | `better-sqlite3` opened read-only with per-session handles + 60s `TtlCache` for rowid / phone↔LID lookups |
+| Webhook ingestion | `POST /api/webhooks/waha` (`@Public()`, Zod-validated, optional HMAC, immediate enqueue) → `webhook:waha` BullMQ queue → `WebhookProcessor` → dispatch table → domain handlers |
 | Testing | Vitest + `@nestjs/testing` + Supertest |
 | Lint / format | ESLint (`strict-type-checked` + `stylistic-type-checked`) + Prettier |
 | CI | GitHub Actions (lint → typecheck → test → build) |
@@ -48,10 +53,18 @@ backend/
 │   ├── shared/                       Framework-agnostic: errors, branded ID types, Result helper, Express type augmentation.
 │   ├── modules/
 │   │   ├── users/                    UsersModule: User entity + UserRepository (camelCase ↔ snake_case via naming strategy).
-│   │   └── auth/                     AuthModule: login/refresh/logout/password-change, RS256 JWT, refresh rotation + family revocation, audit_log writes.
-│   ├── realtime/                     RealtimeModule (Phase 4, in progress): Socket.IO gateway with JWT handshake, room conventions, Redis adapter, Zod event contract.
+│   │   ├── auth/                     AuthModule: login/refresh/logout/password-change, RS256 JWT, refresh rotation + family revocation, audit_log writes.
+│   │   ├── sessions/                 SessionsModule (Phase 8): list/create/start/stop/delete/qr; mirrors WAHA session state into Postgres; webhook-driven status updates emit `session:status`.
+│   │   ├── messages/                 MessagesModule (Phase 8): send/edit/delete/react/forward through WahaService; partitioned `messages` + sub-tables (reactions/edits/quotes/mentions/deleted); rowid-aware listing via WahaStoreService; reconciliation against PendingMessageStore.
+│   │   ├── chats/                    ChatsModule (Phase 8): chat list (10s Redis cache via CacheService.wrap), dedup by id, ChatMetadataRepository, ChatPolicy stub (Phase 9 narrows).
+│   │   └── webhooks/                 WebhooksModule (Phase 7): `POST /api/webhooks/waha`, Zod envelope + optional HMAC, immediate enqueue, dispatch table (real Phase-8 handlers).
+│   ├── queues/                       BullMQ QueueModule (Phase 5+7): `forRootAsync` connection from REDIS_URL, registerQueue for `example` and `webhook:waha`, WorkerHarness, ExampleProcessor, WebhookProcessor.
+│   ├── integrations/
+│   │   ├── waha/                     Pure WahaClient (axios) + WahaService (per-method CircuitBreaker, TtlCache, retry).
+│   │   └── waha-store/               WahaStoreService — read-only NOWEB SQLite reader (rowid + phone↔LID lookups).
+│   ├── realtime/                     RealtimeModule: Socket.IO gateway with JWT handshake, room conventions, Redis adapter, Zod event contract (Phase 8 added message:*/session:status/group:participants).
 │   └── infra/
-│       ├── db/                       DatabaseModule, standalone CLI DataSource, SnakeNamingStrategy, withTransaction, migrations/.
+│       ├── db/                       DatabaseModule, standalone CLI DataSource, SnakeNamingStrategy, withTransaction, migrations/, partitions.ts.
 │       ├── cache/                    CacheModule, ioredis provider, CacheService, DistributedLockService.
 │       └── health/                   HealthModule (/health/live, /health/ready via terminus DB + Redis probes).
 ├── scripts/                          One-shot CLI entry points (migrate, migrate-revert, seed).
@@ -72,7 +85,7 @@ The project lives in a subdirectory under the repo root; the GitHub Actions work
 
 ## 4. Composition root
 
-`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, `AuthModule`, then `RealtimeModule` (Phase 4). It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet — auth is enforced per-controller via `@UseGuards(JwtAuthGuard)` with a `@Public()` opt-out for the login/refresh endpoints (the `@Public()` metadata is honoured by `JwtAuthGuard` itself).
+`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, `AuthModule`, `RealtimeModule`, `WahaModule`, `WahaStoreModule`, `SessionsModule`, `MessagesModule`, `ChatsModule`, `WebhooksModule`, then `QueueModule`. It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet — auth is enforced per-controller via `@UseGuards(JwtAuthGuard)` with a `@Public()` opt-out for the login/refresh endpoints and the webhook ingress (the `@Public()` metadata is honoured by `JwtAuthGuard` itself).
 
 `main.ts` is the only place the global exception filter is registered (`app.useGlobalFilters(new AllExceptionsFilter())`). It also:
 
@@ -83,6 +96,7 @@ The project lives in a subdirectory under the repo root; the GitHub Actions work
 - Configures CORS from `CORS_ORIGINS` (wildcard becomes `origin: true`, otherwise a string array; `credentials: true`).
 - Sets body-parser JSON + urlencoded limits from `BODY_LIMIT`.
 - Calls `app.setGlobalPrefix('api', { exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }] })` so every business route lives under `/api/...` while `/health/live` and `/health/ready` stay at the root (orchestrator probes assume the bare path).
+- Registers a body-parser `verify` callback that stashes the raw request body on `req.rawBody`. The webhook controller (`POST /api/webhooks/waha`) uses this buffer for timing-safe HMAC verification — touching `req.body` after Express has parsed it would lose the byte-exact representation the upstream signed.
 - Registers `app.useWebSocketAdapter(new SocketRedisAdapter(app))` *before* `listen()` so the Socket.IO adapter is in place before any WS upgrade is accepted. The adapter pulls the existing ioredis client out of the cache module via DI — no second Redis connection is opened.
 - Calls `app.enableShutdownHooks()` so the `CacheModule.OnApplicationShutdown` and Nest's TypeORM lifecycle close connections cleanly on SIGTERM.
 - Installs process-level `unhandledRejection` / `uncaughtException` handlers that log and exit 1.
@@ -162,7 +176,7 @@ Stack traces never leave the server. Detail keys are stable enough for clients t
 
 Env is the only configuration input. It is parsed exactly once by `loadEnv` in `src/config/env.ts` at boot. Failure produces a multi-line summary written to stderr and an `Error` thrown out of the `ConfigModule` factory — Nest aborts startup before HTTP listens. Downstream code never reads `process.env` directly; everything injects `APP_CONFIG`.
 
-Phase 2 added `DATABASE_URL`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_IDLE_IN_TX_TIMEOUT_MS`, `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED`, `PG_SSL_CA`, `REDIS_URL`, and `REDIS_KEY_PREFIX` to the schema. Phase 3 added the auth surface: `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `JWT_ACCESS_TTL_SECONDS`, `JWT_ISSUER`, `JWT_AUDIENCE`, `REFRESH_TTL_DAYS`, `REFRESH_COOKIE_NAME`, `REFRESH_COOKIE_PATH`, `REFRESH_COOKIE_SECURE`, `REFRESH_COOKIE_DOMAIN`, `BCRYPT_COST`. PEM keys accept literal `\n` escapes and are normalized to real newlines by the loader. See [modules/config.md](modules/config.md) for the full schema and behaviour.
+Phase 2 added `DATABASE_URL`, `PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_IDLE_IN_TX_TIMEOUT_MS`, `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED`, `PG_SSL_CA`, `REDIS_URL`, and `REDIS_KEY_PREFIX` to the schema. Phase 3 added the auth surface: `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `JWT_ACCESS_TTL_SECONDS`, `JWT_ISSUER`, `JWT_AUDIENCE`, `REFRESH_TTL_DAYS`, `REFRESH_COOKIE_NAME`, `REFRESH_COOKIE_PATH`, `REFRESH_COOKIE_SECURE`, `REFRESH_COOKIE_DOMAIN`, `BCRYPT_COST`. Phase 5 added the queue surface: `QUEUE_PREFIX`, `QUEUE_DEFAULT_ATTEMPTS`, `QUEUE_DEFAULT_BACKOFF_MS`, `QUEUE_REMOVE_ON_COMPLETE`, `QUEUE_REMOVE_ON_FAIL`. Phase 6 added the WAHA HTTP + SQLite surface: `WAHA_BASE_URL` (required), `WAHA_API_KEY?`, `WAHA_TIMEOUT_MS`, `WAHA_MEDIA_TIMEOUT_MS`, `WAHA_RETRY_MAX`, `WAHA_RETRY_BASE_MS`, `WAHA_CB_FAILURE_THRESHOLD`, `WAHA_CB_COOLDOWN_MS`, `WAHA_SESSIONS_CACHE_TTL_MS`, `WAHA_CHATS_CACHE_TTL_MS`, `WAHA_STATUS_CACHE_TTL_MS`, `WAHA_STORE_PATH` (required), `WAHA_STORE_REQUIRE_READONLY`, `WAHA_STORE_CACHE_TTL_MS`. Phase 7 added the webhook surface: `WAHA_WEBHOOK_HMAC_SECRET?`, `WAHA_WEBHOOK_HMAC_HEADER`, `PENDING_MESSAGE_TTL_MS`. PEM keys accept literal `\n` escapes and are normalized to real newlines by the loader. See [modules/config.md](modules/config.md) for the full schema and behaviour.
 
 ## 8. Observability baseline
 
@@ -188,15 +202,20 @@ The redact list (see `src/config/constants.ts`) covers `authorization`, `cookie`
   - Passwords hash with **bcrypt cost 12** (configurable via `BCRYPT_COST`). A dummy hash is also compared on "user not found" to keep timing roughly equivalent to "wrong password".
   - Refresh cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/api/auth` (`Secure` configurable via `REFRESH_COOKIE_SECURE` for local plain-HTTP dev only).
   - Append-only `audit_log` writes for `auth.login.success`, `auth.login.failure`, `auth.refresh.success`, `auth.refresh.reuse`, `auth.refresh.invalid`, `auth.logout`, `auth.password.change`. The table is range-partitioned monthly by `created_at`; `ensure_audit_log_partition(date)` materializes future partitions.
-  - `JwtAuthGuard` enforces auth per-controller via `@UseGuards`. `@Public()` opts a handler out (used on `POST /api/auth/login` and `POST /api/auth/refresh`). `AdminGuard` (paired with optional `@Roles(...)`) restricts admin-only routes.
+  - `JwtAuthGuard` enforces auth per-controller via `@UseGuards`. `@Public()` opts a handler out (used on `POST /api/auth/login`, `POST /api/auth/refresh`, and `POST /api/webhooks/waha`). `AdminGuard` (paired with optional `@Roles(...)`) restricts admin-only routes.
+- **Webhook ingress (Phase 7):**
+  - `POST /api/webhooks/waha` is `@Public()` but sits behind optional HMAC verification (`WAHA_WEBHOOK_HMAC_SECRET`). The signature is checked against `req.rawBody` (raw body captured by the body-parser `verify` hook) via `crypto.timingSafeEqual`; the `sha256=` prefix WAHA may send is stripped before comparison.
+  - The controller validates the envelope with Zod, immediately enqueues to `webhook:waha` with `jobId = event.id` (queue-level dedupe across redelivery), and returns 200 in milliseconds. All real work runs in the `WebhookProcessor` worker.
+  - The processor normalizes phone-format JIDs to LID through `WahaStoreService.phoneToLid`, then dispatches by event type. Unknown events log + ack so a misconfigured upstream doesn't cause retry storms.
+  - Dedicated per-route rate limit class is planned for Phase 11.
 - No rate limiting yet — planned in Phase 11.
 
 ## 10. Testing baseline
 
-Vitest runs three groups today (85 tests, all green):
+Vitest runs three groups today (196 tests, all green):
 
-1. **Unit** — env parsing (including PEM `\n` normalization), exception filter mapping, correlation middleware behaviour, snake-case helper, `SnakeNamingStrategy` hooks, `withTransaction` commit/rollback/isolation, `CacheService.wrap` (hit, miss, error path, lock contention fallback), `DistributedLockService` (acquire, retry, release, expired release), `AuthService` (login happy + bad-email + wrong-password + disabled, refresh rotation, family revocation on revoked-replay AND wrong-secret-on-known-id, expired-token rejection, change-password revokes all families, logout family revoke, `parseRefreshToken` malformed input), `JwtAuthGuard` (public bypass, missing bearer, verify failure, valid token populates `req.user`), `AdminGuard` (admin allowed, developer forbidden, `@Roles` override), Zod auth schemas.
-2. **Integration** (`test/health.e2e-spec.ts`) — boots a minimal Nest application that mounts `ConfigModule`, `LoggerModule`, `CorrelationMiddleware`, and a stand-alone liveness controller; exercises the live probe + 404 envelope without requiring real Postgres / Redis. End-to-end integration against the full `AppModule` (which boots TypeORM + ioredis + WAHA) and a live login → refresh → logout flow are deferred to the Testcontainers harness in Phase 12.
+1. **Unit** — env parsing (incl. PEM `\n` normalization), exception filter mapping, correlation middleware, snake-case helper, `SnakeNamingStrategy` hooks, `withTransaction` commit/rollback/isolation, `CacheService.wrap` (hit, miss, error path, lock contention fallback), `DistributedLockService` (acquire, retry, release, expired release), `AuthService` (login + refresh rotation + family revocation + change-password + logout + parseRefreshToken edge cases), `JwtAuthGuard` / `AdminGuard`, Zod auth schemas, `WorkerHarness` (Zod parse + correlation log fields + retry behaviour), `ExampleProcessor` / `ExampleQueueProducer` (jobId idempotency), `buildQueueOptions` (URL parsing, maxRetriesPerRequest, defaults), `TtlCache` (TTL expiry, stampede single-flight), `CircuitBreaker` (closed→open→half-open→closed state machine), `WahaClient` (axios round-trip + 5xx/4xx error wrapping against a local HTTP stub), `WahaService` (cache + retry + circuit + mutation no-retry + invalidation), `WahaStoreService` (read-only handle, rowid sort, JID lookups, bootstrap read-only check), `WebhooksService` (HMAC verify incl. sha256= prefix + tampered + missing inputs, enqueue jobId), `WebhookDispatch` (every event type routes, unknown ack-only, handler errors propagate), `WebhookProcessor` (phone→LID normalization across nested payloads, invalid envelope rejection), `WebhooksController` (HMAC gate + envelope plumbing), `PendingMessageStore` (TTL writes + isPending + resolve return value), `dedupeChats` (LID preference w/ phone↔LID aliasing), `sortByRowid` (null rowids sink, stable tiebreak), `ChatPolicy` (admin/developer stub), `SessionsService` (create/stop/applyStatusUpdate), `MessagesService.upsertFromWebhook` (pending-resolves-silently vs novel-emits-message:new).
+2. **Integration** (`test/health.e2e-spec.ts`, `test/realtime.e2e-spec.ts`) — boot minimal Nest apps that exercise the live probe + 404 envelope and the Socket.IO handshake + room behaviour without requiring real Postgres / Redis. End-to-end Testcontainers Postgres + Redis + WAHA-stub coverage (full login → refresh → logout, send → reconcile, queue round-trip, cross-pod adapter fanout) is deferred to Phase 12.
 3. **Coverage** — V8 provider, excludes `*.module.ts`, `*.d.ts`, and `main.ts`.
 
 Path alias `@app/*` → `src/*` works in both `tsc` and Vitest (the latter via `vite-tsconfig-paths`). All persistence + auth unit tests use in-memory fakes (mocked `QueryRunner`, in-memory Redis double, in-memory token/audit map, mocked `JwtService`) — no Docker required.
@@ -281,12 +300,15 @@ The frontend's later phases assume these endpoints. They land in the correspondi
 | Frontend phase | Endpoints / channels expected | Backend phase |
 | --- | --- | --- |
 | 3 — auth | `POST /api/auth/login`, `POST /api/auth/refresh` (cookie), `POST /api/auth/logout`, `PATCH /api/auth/password` — all live. `GET /api/auth/me` not yet built; user profile is currently embedded in the login/refresh response body. | 3 — Auth (✅) |
-| 5 — realtime core | Socket.IO over `websocket` transport, handshake `{ auth: { token } }`, server-emitted `error:invalid_payload`, `GET /api/sync?since=<seq>` | 4+ |
-| 7 — chats | `GET /api/chats`, `POST /api/chats/:chatId/read`, mute toggle | 5+ |
-| 8 — messages | `GET /api/messages/:chatId`, `POST /api/messages/:chatId/send`, `PATCH`/`DELETE`/`POST /reaction`, `POST /api/messages/forward`, `GET /api/chats/:chatId/participants` | 5+ |
-| 9 — admin | `GET/POST/DELETE /api/sessions/...`, `GET/POST/DELETE /api/assignments`, `GET/POST/PATCH/DELETE /api/users`, `PATCH /api/mute/global`, `GET/PATCH /api/feedback` | 6+ |
+| 5 — realtime core | Socket.IO over `websocket` transport, handshake `{ auth: { token } }`, server-emitted `error:invalid_payload`. `GET /api/sync?since=<seq>` still planned. | 4 — Realtime (✅) |
+| 7 — chats | `GET /api/chats?session=<n>`, `POST /api/chats/:chatId/read`, `POST /api/chats/sync?session=<n>` — live. Mute toggle deferred to Phase 9. | 8 — Domain (✅) |
+| 8 — messages | `GET /api/messages/:chatId?session=<n>`, `POST /api/messages/:chatId/send`, `POST /api/messages/:chatId/media`, `PATCH /api/messages/:chatId/:stanzaId`, `DELETE /api/messages/:chatId/:stanzaId`, `POST /api/messages/:chatId/:stanzaId/react`, `POST /api/messages/:chatId/:stanzaId/forward` — live. `GET /api/chats/:chatId/participants` still planned (WAHA call wrapper). | 8 — Domain (✅) |
+| 8 — sessions | `GET/POST /api/sessions`, `GET /api/sessions/:name`, `POST /api/sessions/:name/start`, `POST /api/sessions/:name/stop`, `DELETE /api/sessions/:name`, `GET /api/sessions/:name/qr` — live (all admin-gated). | 8 — Domain (✅) |
+| 9 — admin | `GET/POST/DELETE /api/assignments`, `GET/POST/PATCH/DELETE /api/users`, `PATCH /api/mute/global`, `GET/PATCH /api/feedback` — planned Phase 9. | 9 — Collaboration |
 
-Socket events the frontend will register handlers for (phase-ordered, names from `FRONTEND_ARCHITECTURE.md §6` and `FRONTEND_IMPLEMENTATION_PLAN.md` phases 7–9): `message:new`, `message:ack`, `message:edited`, `message:deleted`, `message:reaction`, `chat:assigned`, `chat:unassigned`, `chat:read`, `chat:muted`, `session:status`, `auth:ready`, `auth:logged-out`. Mirror the payload Zod schemas in `realtime/events.contract.ts` on the frontend side; both ends must agree.
+Webhook ingress (server-to-server, not for the frontend): `POST /api/webhooks/waha` — `@Public()`, optional `X-Webhook-Hmac` header (hex SHA-256 of raw body, accepts `sha256=` prefix), Zod-validated envelope `{ id, event, session, payload, ... }`, returns 200 with `{ accepted: true }` after enqueue. Webhook events dispatched: `message`, `message.any`, `message.ack`, `message.edited`, `message.reaction`, `message.revoked`, `session.status`, `group.v2.participants` (others log + ack).
+
+Socket events the frontend will register handlers for (phase-ordered, names from `FRONTEND_ARCHITECTURE.md §6` and `FRONTEND_IMPLEMENTATION_PLAN.md` phases 7–9): `message:new`, `message:ack`, `message:edited`, `message:deleted`, `message:reaction`, `session:status`, `group:participants` (all live as of Phase 8); `chat:assigned`, `chat:unassigned`, `chat:read`, `chat:muted` (Phase 9); `auth:ready`, `auth:logged-out` (planned). Mirror the payload Zod schemas in `realtime/events.contract.ts` on the frontend side; both ends must agree.
 
 ### Body limits
 
@@ -310,17 +332,24 @@ If any of these change, update this section and the frontend's [docs/context.md]
 
 | Area | Doc | Status |
 | --- | --- | --- |
-| Bootstrap (`main.ts`, `AppModule`) | [modules/bootstrap.md](modules/bootstrap.md) | ✅ Phase 1–3 wiring |
-| ConfigModule + env parsing | [modules/config.md](modules/config.md) | ✅ Phase 1–3 surface |
+| Bootstrap (`main.ts`, `AppModule`) | [modules/bootstrap.md](modules/bootstrap.md) | ✅ Phases 1–8 wiring |
+| ConfigModule + env parsing | [modules/config.md](modules/config.md) | ✅ Phases 1–7 surface |
 | LoggerModule (`nestjs-pino`) | [modules/logger.md](modules/logger.md) | ✅ Phase 1 |
 | Common (middleware, filter, pipe, decorators, guards) | [modules/common.md](modules/common.md) | ✅ Phase 1 + 3 |
 | Shared (errors, branded IDs, Result, Express types) | [modules/shared.md](modules/shared.md) | ✅ Phase 1 |
-| DatabaseModule (TypeORM, naming, transactions, migrations) | [modules/db.md](modules/db.md) | ✅ Phase 2 + 3 (migration 0002 auth) |
+| DatabaseModule (TypeORM, naming, transactions, migrations, partitions) | [modules/db.md](modules/db.md) | ✅ Phase 2 + 3 + 8 (migration 0003 messaging) |
 | CacheModule (Redis client, CacheService, DistributedLockService) | [modules/cache.md](modules/cache.md) | ✅ Phase 2 |
 | HealthModule | [modules/health.md](modules/health.md) | ✅ Phase 2 (terminus DB + Redis) |
 | UsersModule | [modules/users.md](modules/users.md) | ✅ Phase 3 |
 | AuthModule | [modules/auth.md](modules/auth.md) | ✅ Phase 3 |
-| RealtimeModule | [modules/realtime.md](modules/realtime.md) | ✅ Phase 4 |
+| RealtimeModule | [modules/realtime.md](modules/realtime.md) | ✅ Phase 4 + 8 events |
+| QueueModule (BullMQ, WorkerHarness, processors) | [modules/queues.md](modules/queues.md) | ✅ Phase 5 + 7 |
+| WahaModule (resilience-wrapped HTTP client) | [modules/waha.md](modules/waha.md) | ✅ Phase 6 |
+| WahaStoreModule (read-only NOWEB SQLite reader) | [modules/waha-store.md](modules/waha-store.md) | ✅ Phase 6 |
+| WebhooksModule (ingress + dispatch table) | [modules/webhooks.md](modules/webhooks.md) | ✅ Phase 7 + 8 handlers |
+| SessionsModule | [modules/sessions.md](modules/sessions.md) | ✅ Phase 8 |
+| MessagesModule | [modules/messages.md](modules/messages.md) | ✅ Phase 8 |
+| ChatsModule | [modules/chats.md](modules/chats.md) | ✅ Phase 8 |
 
 Future phases will add their own entries to this table.
 

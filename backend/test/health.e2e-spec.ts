@@ -36,6 +36,8 @@ describe('Liveness + correlation + 404 envelope (no infra)', () => {
     process.env.REDIS_URL ??= 'redis://localhost:6379';
     process.env.JWT_PRIVATE_KEY ??= '-----BEGIN PRIVATE KEY-----\nstub\n-----END PRIVATE KEY-----';
     process.env.JWT_PUBLIC_KEY ??= '-----BEGIN PUBLIC KEY-----\nstub\n-----END PUBLIC KEY-----';
+    process.env.WAHA_BASE_URL ??= 'http://localhost:3001';
+    process.env.WAHA_STORE_PATH ??= '/tmp/waha-store.db';
     const mod = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
     app = mod.createNestApplication();
     app.useGlobalFilters(new AllExceptionsFilter());

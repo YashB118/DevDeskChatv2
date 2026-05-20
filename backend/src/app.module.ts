@@ -5,10 +5,16 @@ import { DatabaseModule } from '@app/infra/db/database.module';
 import { CacheModule } from '@app/infra/cache/cache.module';
 import { HealthModule } from '@app/infra/health/health.module';
 import { CorrelationMiddleware } from '@app/common/middleware/correlation.middleware';
-import { TransactionRunner } from '@app/infra/db/transactions';
 import { UsersModule } from '@app/modules/users/users.module';
 import { AuthModule } from '@app/modules/auth/auth.module';
 import { RealtimeModule } from '@app/realtime/realtime.module';
+import { QueueModule } from '@app/queues/queue.module';
+import { WahaModule } from '@app/integrations/waha/waha.module';
+import { WahaStoreModule } from '@app/integrations/waha-store/waha-store.module';
+import { MessagesModule } from '@app/modules/messages/messages.module';
+import { ChatsModule } from '@app/modules/chats/chats.module';
+import { SessionsModule } from '@app/modules/sessions/sessions.module';
+import { WebhooksModule } from '@app/modules/webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -20,9 +26,14 @@ import { RealtimeModule } from '@app/realtime/realtime.module';
     UsersModule,
     AuthModule,
     RealtimeModule,
+    WahaModule,
+    WahaStoreModule,
+    SessionsModule,
+    MessagesModule,
+    ChatsModule,
+    WebhooksModule,
+    QueueModule,
   ],
-  providers: [TransactionRunner],
-  exports: [TransactionRunner],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

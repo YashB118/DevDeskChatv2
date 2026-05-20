@@ -11,6 +11,8 @@
 - `src/infra/db/transactions.ts` — `withTransaction(...)` + `TransactionRunner` injectable.
 - `src/infra/db/migrations/0001_init.ts` — initial migration (enables `pgcrypto`).
 - `src/infra/db/migrations/0002_auth.ts` — Phase 3 schema: `citext` extension, `user_role` enum, `users`, `refresh_tokens`, range-partitioned `audit_log` + `ensure_audit_log_partition(date)` helper.
+- `src/infra/db/migrations/0003_messaging.ts` — Phase 8 schema: `session_status` + `message_type` enums, `sessions`, `chat_metadata`, range-partitioned `messages` (composite PK `(id, sent_at)`, BRIN on `sent_at`, `(chat_id, sent_at DESC)` index), `message_reactions` / `message_edits` / `deleted_messages` / `message_mentions` / `message_quotes` sub-tables (keyed by `stanza_id` — Postgres won't allow FKs to a partitioned table on a non-unique column), `ensure_messages_partition(date)` helper.
+- `src/infra/db/partitions.ts` — `ensureMessagesPartitionsForNextMonths(dataSource, n)` and `ensureAuditLogPartitionsForNextMonths(dataSource, n)` wrappers; called at boot and from the Phase-12 daily cron.
 - `scripts/migrate.ts`, `scripts/migrate-revert.ts`, `scripts/seed.ts` — CLI entry points.
 
 ---
@@ -122,19 +124,23 @@ The exported `IsolationLevel` type is a string union (`'READ UNCOMMITTED' | 'REA
 - Live under `src/infra/db/migrations/`. The current set:
   - `0001_init.ts` — enables `pgcrypto` (needed for `gen_random_uuid()`).
   - `0002_auth.ts` — enables `citext`, creates the `user_role` enum (`ADMIN | DEVELOPER`), the `users` table (with `email citext UNIQUE` and the `idx_users_active` partial index `WHERE disabled = false`), the `refresh_tokens` table (FK to users `ON DELETE CASCADE`, self-FK on `replaced_by`, indexes on `family_id`, `(user_id, revoked)`, and the partial `(expires_at) WHERE revoked = false`), and the **range-partitioned** `audit_log` table.
+  - `0003_messaging.ts` — creates the `session_status` and `message_type` enums, the `sessions` table (`name UNIQUE`, `config jsonb`), the `chat_metadata` table (per-chat overrides keyed by `chat_id`), the **range-partitioned** `messages` table (composite PK `(id, sent_at)`, `(chat_id, sent_at DESC)` index, BRIN on `sent_at`, `UNIQUE (stanza_id, sent_at)`), the `ensure_messages_partition(date)` SQL helper, the current-month + next-two-month partitions, and the `message_reactions` / `message_edits` / `deleted_messages` / `message_mentions` / `message_quotes` sub-tables keyed by `stanza_id`.
 - Filenames follow `<numeric-prefix>_<slug>.ts` ordered chronologically. The class name suffix is the numeric timestamp expected by TypeORM (`Init0001_1700000000000`, `Auth0002_1700000001000`).
 - Raw SQL inside migrations references **snake_case identifiers** — the naming strategy does not apply to raw SQL. Always use parameter binding for any dynamic value (never string interpolation).
 - Migrations run inside their own transaction (`{ transaction: 'each' }`) so a partial failure rolls back atomically.
 
-### `audit_log` partitioning
+### Range-partitioned tables
 
-`audit_log` is partitioned by RANGE on `created_at`. Postgres requires the PK to include the partition key, so the table's primary key is `(id, created_at)`. The migration also installs a SQL helper:
+Two tables are partitioned by RANGE on a timestamp column. Postgres requires the PK to include the partition key, so each table's PK is composite:
 
-```sql
-ensure_audit_log_partition(target_month date) -- creates audit_log_YYYY_MM if missing
-```
+| Table | Partition column | PK | Helper |
+| --- | --- | --- | --- |
+| `audit_log` | `created_at` | `(id, created_at)` | `ensure_audit_log_partition(date)` |
+| `messages` | `sent_at` | `(id, sent_at)` | `ensure_messages_partition(date)` |
 
-The migration materializes the current month plus the next two months so a fresh install can write immediately. A future cron (Phase 12) will call `ensure_audit_log_partition` daily to keep the rolling window populated. If you author a new range-partitioned table, copy this pattern: PK includes the partition key, helper SQL function alongside the table, and initial partitions in the migration.
+Each migration materializes the current month plus the next two so a fresh install can write immediately. `src/infra/db/partitions.ts` exports `ensureMessagesPartitionsForNextMonths(dataSource, n)` and `ensureAuditLogPartitionsForNextMonths(dataSource, n)` — both call the SQL helpers in a loop and are idempotent (`CREATE TABLE IF NOT EXISTS`). A daily `CronJob` in Phase 12 will invoke them to keep the rolling window populated. If you author a new range-partitioned table, copy this pattern: composite PK that includes the partition key, helper SQL function alongside the table, initial partitions in the migration, and a wrapper in `partitions.ts`.
+
+Children of `messages` (reactions / edits / deletions / mentions / quotes) do **not** carry FKs back — Postgres won't allow FKs to a partitioned table on a non-unique column. The sub-tables key on `stanza_id` instead, which is `UNIQUE (stanza_id, sent_at)` on the parent. This is intentional; treat the `stanza_id` value as the join key in repositories.
 
 ### Scripts
 
