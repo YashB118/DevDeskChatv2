@@ -2,7 +2,7 @@
 
 > The build, lint, type, test, and CI configuration. Not a feature module — described here so an AI editing config can understand the constraints these tools enforce on the rest of the codebase.
 
-**Status:** Phase 1 — full toolchain in place. Subsequent phases add Tailwind (Phase 2), Storybook (Phase 2), Chromatic + Playwright + Lighthouse (Phase 12), and a bundle-budget plugin (Phase 11).
+**Status:** Phase 2 — toolchain now covers Tailwind v4 (via `@tailwindcss/vite`), Storybook 8 (`@storybook/react-vite` + `@storybook/addon-a11y`), and `vitest-axe` matchers. Remaining work: Chromatic + Playwright + Lighthouse (Phase 12) and a bundle-budget plugin (Phase 11).
 
 ---
 
@@ -16,9 +16,14 @@
 | `frontend/vitest.config.ts` | Vitest test runner config with jsdom env and test-environment `VITE_*` defaults. |
 | `frontend/eslint.config.js` | Flat-config ESLint with typescript-eslint strict-type-checked, react-hooks, jsx-a11y, boundaries. |
 | `frontend/.prettierrc.json` | Prettier formatting rules. |
-| `frontend/index.html` | Vite HTML entry with strict CSP `<meta>` placeholder. |
+| `frontend/index.html` | Vite HTML entry with strict CSP `<meta>` placeholder. Loads `/theme-bootstrap.js` synchronously in `<head>` before the module script. |
+| `frontend/public/theme-bootstrap.js` | Sets `data-theme` + `data-theme-preference` on `<html>` before React mounts. Eliminates FOUC. Static script (no inline) so CSP `script-src 'self'` covers it; SHA-pinning deferred to Phase 11. |
 | `frontend/.env.example` | Documents the required `VITE_*` keys. |
 | `frontend/src/vite-env.d.ts` | Vite client types. |
+| `frontend/src/tests/setup.ts` | Vitest setup — jest-dom + `vitest-axe` matchers, `matchMedia` jsdom stub, `cleanup()` afterEach. |
+| `frontend/src/tests/vitest-axe.d.ts` | Augments Vitest's `Assertion` interface with the axe matchers. |
+| `frontend/.storybook/main.ts` | Storybook config — stories glob, addons (`essentials`, `a11y`), `react-vite` framework, `docs.autodocs: 'tag'`. |
+| `frontend/.storybook/preview.ts` | Storybook preview — imports global CSS, defines the theme toolbar global, applies `data-theme` per story. |
 | `.github/workflows/frontend.yml` | CI pipeline (repo root). |
 
 ## npm scripts
@@ -32,6 +37,8 @@
 | `npm run typecheck` | `tsc --noEmit`. No emit, just type validation. |
 | `npm test` | `vitest run` (one-shot). |
 | `npm run test:watch` | `vitest` (watch mode). |
+| `npm run storybook` | Storybook dev server on port 6006. |
+| `npm run build-storybook` | Static Storybook export to `storybook-static/`. |
 
 CI runs lint, typecheck, test, build in that order on every PR touching `frontend/**`.
 
@@ -71,9 +78,12 @@ Boundaries plugin classifies files by `boundaries/elements` patterns; rules in `
 
 `eslint-import-resolver-typescript` is required so the resolver understands `@/*` and `.ts(x)` extensions.
 
+The ignore list explicitly excludes `dist`, `node_modules`, `coverage`, `.husky`, `.storybook`, `public`, and `storybook-static` — Storybook config and the theme bootstrap script live outside the typed project graph and are not lintable under the project-service parser.
+
 ## Vite configuration
 
 - React plugin via `@vitejs/plugin-react`.
+- Tailwind v4 plugin via `@tailwindcss/vite` — replaces the legacy `tailwind.config.ts` + PostCSS pipeline. Tailwind reads CSS variables exposed by `src/styles/tailwind.css` (which `@import`s the design-system theme files and binds them via `@theme`).
 - `@/` alias → `src/`.
 - `build.target: 'es2022'` matches the TS target.
 - `sourcemap: true` for production debugging.
@@ -81,12 +91,16 @@ Boundaries plugin classifies files by `boundaries/elements` patterns; rules in `
 
 A bundle-budget plugin is referenced in Phase 1's plan but actually wired in Phase 11.
 
+Current production bundle (post Phase 2): 386.64 KB JS / 112.52 KB gzipped — above the 250 KB target. Pulled under budget once admin code-splitting (Phase 4 router + Phase 9 admin chunk) lands.
+
 ## Vitest configuration
 
 - `environment: 'jsdom'` — DOM globals available in tests.
 - `globals: true` — describe/it/expect/vi available without imports.
-- `setupFiles: ['./src/tests/setup.ts']` — global setup imports jest-dom matchers and runs `cleanup()` after each test.
+- `setupFiles: ['./src/tests/setup.ts']` — registers jest-dom matchers, registers `vitest-axe` matchers via `expect.extend(axeMatchers)`, stubs `window.matchMedia` (jsdom does not implement it), runs `cleanup()` after each test.
 - `test.env` block provides the `VITE_*` values that `lib/env.ts` requires for its eager parse.
+
+`vitest-axe`'s shipped `extend-expect` entrypoint is empty in the installed version, so we register the matchers manually in `setup.ts`. Type augmentation lives in `src/tests/vitest-axe.d.ts` (declares the matcher methods on Vitest's `Assertion` interface).
 
 The Vitest config and Vite config are separate files because Vitest 3 ships its own internal Vite types and merging the two in one file causes type conflicts with `exactOptionalPropertyTypes: true`.
 
@@ -115,7 +129,7 @@ The Husky pre-commit hook file is not committed yet. To enable hooks locally, ru
 
 ## CSP
 
-`index.html` ships a strict CSP `<meta>` that limits `default-src`, `script-src`, `connect-src`, `img-src`, `font-src` to `'self'` (with `data:` / `blob:` exceptions for images, fonts). `style-src` permits `'unsafe-inline'` only as a Phase 1 placeholder; Phase 11 tightens this with SHA-pinned inline scripts and removes the unsafe-inline allowance once the theme bootstrap script is in.
+`index.html` ships a strict CSP `<meta>` that limits `default-src`, `script-src`, `connect-src`, `img-src`, `font-src` to `'self'` (with `data:` / `blob:` exceptions for images, fonts). The theme bootstrap is served as a static asset at `/theme-bootstrap.js` (not inline), so `script-src 'self'` covers it without further relaxation. `style-src` still permits `'unsafe-inline'` because Radix and Tailwind v4 inject runtime styles; Phase 11 tightens this further (nonce or hash-based) and adds SHA-pinning for any inline scripts that remain.
 
 ## How to extend
 
@@ -131,10 +145,12 @@ The Husky pre-commit hook file is not committed yet. To enable hooks locally, ru
 
 ## Known deviations from the architecture doc
 
-- **Bundle size**: Phase 1's plan target was "<50 KB gzipped." Current production build is ~61 KB gzipped, which is the floor of React 19 + ReactDOM. Documented; no action.
+- **Bundle size**: Phase 1 floor was ~61 KB gzipped; post Phase 2 the production bundle is 386.64 KB raw / 112.52 KB gzipped — over the 250 KB initial-JS target from `FRONTEND_ARCHITECTURE.md §17`. Driven by Radix primitives, Framer Motion, and the curated `lucide-react` set. Code-splitting in Phase 4 (router) and Phase 9 (admin chunk) pulls this under budget; budget assertion lands in Phase 11.
 - **`eslint.config.ts` (TS) vs `eslint.config.js` (JS)**: Plan suggested a TS config file. We ship `.js` to avoid the jiti/native-TS loader friction in ESLint 9. Functionality is identical.
 - **Bundle-budget Vite plugin**: Referenced in Phase 1 plan, actually implemented in Phase 11.
 - **Husky pre-commit hook**: Config in `package.json` but the hook file is not committed; contributors enable it locally.
+- **Tailwind config file**: Tailwind v4 reads CSS variables via `@theme` directly inside `src/styles/tailwind.css`. No `tailwind.config.ts` is needed — the file referenced in the Phase 1 folder shape never materialized, and isn't required by Tailwind v4.
+- **`vitest-axe` extend-expect**: The package's shipped `extend-expect.js` is empty (upstream issue). We extend `expect` manually in `src/tests/setup.ts`.
 
 ## References
 

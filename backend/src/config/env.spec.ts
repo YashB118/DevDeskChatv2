@@ -12,7 +12,7 @@ describe('loadEnv', () => {
     expect(config.NODE_ENV).toBe('development');
     expect(config.PORT).toBe(3005);
     expect(config.LOG_LEVEL).toBe('info');
-    expect(config.CORS_ORIGINS).toEqual(['http://localhost:3005']);
+    expect(config.CORS_ORIGINS).toEqual(['http://localhost:5173']);
     expect(config.TRUST_PROXY).toBe(false);
     expect(config.PG_POOL_MAX).toBe(20);
     expect(config.PG_STATEMENT_TIMEOUT_MS).toBe(5000);

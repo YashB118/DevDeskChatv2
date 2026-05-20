@@ -15,8 +15,8 @@ export default defineConfig({
     setupFiles: ['./src/tests/setup.ts'],
     css: false,
     env: {
-      VITE_API_BASE_URL: 'http://localhost:4000',
-      VITE_SOCKET_URL: 'http://localhost:4000',
+      VITE_API_BASE_URL: 'http://localhost:3005',
+      VITE_SOCKET_URL: 'http://localhost:3005',
       VITE_APP_ENV: 'development',
     },
   },

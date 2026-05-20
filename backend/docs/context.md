@@ -200,6 +200,87 @@ Path alias `@app/*` → `src/*` works in both `tsc` and Vitest (the latter via `
 
 `.github/workflows/ci.yml` runs on push to `main` and on every pull request. It installs npm deps via `npm ci`, then runs `lint`, `typecheck`, `test`, and `build` from `backend/`. Failures gate merges.
 
+## 12a. Frontend integration contract
+
+The frontend (`../frontend/`) consumes this backend and depends on a small, stable surface that is already wired today. This section is the authoritative cross-process contract — change anything below in lock-step on both sides.
+
+### Network topology (local dev)
+
+| Process | Port | Source |
+| --- | --- | --- |
+| Backend HTTP / WebSocket | `3005` | `PORT` env (`src/config/env.ts`) |
+| Frontend Vite dev server | `5173` | `vite.config.ts` |
+| CORS allow-list | `http://localhost:5173` | `CORS_ORIGINS` env default |
+| Frontend `VITE_API_BASE_URL` | `http://localhost:3005` | `frontend/.env.example` |
+| Frontend `VITE_SOCKET_URL` | `http://localhost:3005` | `frontend/.env.example` |
+
+Production / staging override `CORS_ORIGINS` and the frontend's `VITE_*` to real hostnames. The relationship — frontend origin appears in `CORS_ORIGINS`, frontend `VITE_API_BASE_URL` points at the backend — is invariant.
+
+### HTTP envelope (load-bearing)
+
+Every response from `AllExceptionsFilter` (`src/common/filters/all-exceptions.filter.ts`) is shaped as:
+
+```json
+{ "error": { "code": "<STRING_CONSTANT>", "message": "...", "correlationId": "<uuid>", "details": { ... } } }
+```
+
+The frontend's planned `AppApiError` (architecture §9.1, Phase 3) decodes exactly this shape. Stable `code` values today:
+- `VALIDATION_ERROR` — ZodError, 400. `details.issues = Array<{ path, message, code }>`.
+- `BAD_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `UNPROCESSABLE_ENTITY`, `RATE_LIMITED`, `HTTP_ERROR` — `HttpException` derived from status.
+- `INTERNAL_ERROR` — anything else, 500.
+- Future `AppError` subclasses (auth, sessions, etc.) ship their own `code` constants.
+
+Successful 2xx responses are free-form per endpoint and validated by the frontend's per-feature Zod schemas. Do **not** introduce a wrapping envelope around success payloads — the frontend's `apiClient` (Phase 3) expects raw bodies.
+
+### Correlation header
+
+`x-correlation-id` is honoured on the request and echoed on the response (`src/common/middleware/correlation.middleware.ts`). Frontend convention is to attach `X-Correlation-Id` per request (Phase 11 observability) and surface it in error toasts; HTTP header lookup is case-insensitive so both casings work. If the inbound value is not a UUID, the middleware generates a new one — clients must read the echoed value, never assume their own.
+
+### Cookies, credentials, CSRF
+
+- CORS is configured with `credentials: true` (`src/main.ts`).
+- Frontend HTTP client (Phase 3) uses `withCredentials: true`.
+- Phase 3 auth (planned) issues an httpOnly refresh cookie; access tokens stay in memory only.
+- Cookie attributes (planned): `HttpOnly; Secure; SameSite=Lax; Path=/api/auth`. `Secure` is required in production; `SameSite=Lax` is correct for a same-site dev flow and works cross-origin in production when the frontend and backend share an eTLD+1. Cross-site deployments need `SameSite=None; Secure`.
+- CSRF: the frontend never reads cookies from JS (refresh cookie is httpOnly); the access token in `Authorization: Bearer` is not vulnerable to CSRF.
+
+### Health endpoints (frontend may probe)
+
+- `GET /health/live` → `200 { status: 'ok', uptimeSeconds, timestamp }`. Cheap, no I/O.
+- `GET /health/ready` → terminus shape, performs DB + Redis ping. Use for orchestrator readiness; do not call from the UI on every render.
+
+### Endpoints not yet built (phase-ordered gap)
+
+The frontend's later phases assume these endpoints. They land in the corresponding backend phases — until then the frontend feature blocks behind its own phase boundary.
+
+| Frontend phase | Endpoints / channels expected | Backend phase |
+| --- | --- | --- |
+| 3 — auth | `POST /api/auth/login`, `POST /api/auth/refresh` (cookie), `POST /api/auth/logout`, `PATCH /api/auth/password`, `GET /api/auth/me` | 3 — Auth |
+| 5 — realtime core | Socket.IO over `websocket` transport, handshake `{ auth: { token } }`, server-emitted `error:invalid_payload`, `GET /api/sync?since=<seq>` | 4+ |
+| 7 — chats | `GET /api/chats`, `POST /api/chats/:chatId/read`, mute toggle | 5+ |
+| 8 — messages | `GET /api/messages/:chatId`, `POST /api/messages/:chatId/send`, `PATCH`/`DELETE`/`POST /reaction`, `POST /api/messages/forward`, `GET /api/chats/:chatId/participants` | 5+ |
+| 9 — admin | `GET/POST/DELETE /api/sessions/...`, `GET/POST/DELETE /api/assignments`, `GET/POST/PATCH/DELETE /api/users`, `PATCH /api/mute/global`, `GET/PATCH /api/feedback` | 6+ |
+
+Socket events the frontend will register handlers for (phase-ordered, names from `FRONTEND_ARCHITECTURE.md §6` and `FRONTEND_IMPLEMENTATION_PLAN.md` phases 7–9): `message:new`, `message:ack`, `message:edited`, `message:deleted`, `message:reaction`, `chat:assigned`, `chat:unassigned`, `chat:read`, `chat:muted`, `session:status`, `auth:ready`, `auth:logged-out`. Mirror the payload Zod schemas in `realtime/events.contract.ts` on the frontend side; both ends must agree.
+
+### Body limits
+
+`BODY_LIMIT` (default `2mb`) is fine for chat-text traffic. Frontend Phase 8 introduces media uploads (images, audio, documents); raise the limit explicitly for those endpoints or switch to a presigned-upload pattern. Do not silently bump the global limit.
+
+### Observability beacons (Phase 11)
+
+The frontend's Phase 11 wires `navigator.sendBeacon` to a backend endpoint for Web Vitals + custom metrics. The endpoint does not exist yet; plan it under `infra/observability/` when Phase 11 of either side lands. Payload contract is the frontend's responsibility (Zod-validated client-side before send); backend just persists / forwards.
+
+### Invariants the backend will not break without a coordinated migration
+
+- Error envelope shape and `code` constants.
+- `x-correlation-id` middleware behaviour (echo a valid UUID, generate otherwise).
+- `credentials: true` CORS + `CORS_ORIGINS` honouring the frontend origin.
+- `synchronize: false` (frontend never assumes ad-hoc schema drift — every state change is a migration).
+- Stack traces never leave the server.
+
+If any of these change, update this section and the frontend's [docs/context.md](../../frontend/docs/context.md) §9 in the same change-set.
+
 ## 13. Module map
 
 | Area | Doc | Status |

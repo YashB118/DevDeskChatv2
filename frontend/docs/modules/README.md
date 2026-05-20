@@ -2,20 +2,20 @@
 
 Per-module context files. Add a new file here only when actual code for that module lands — empty stub folders do not get docs (progressive build rule).
 
-## Built modules (after Phase 1)
+## Built modules (after Phase 2)
 
 | Module | Doc | Source |
 |---|---|---|
-| App Shell — boot orchestration, providers, error boundary | [`app-shell.md`](app-shell.md) | `frontend/src/main.tsx`, `frontend/src/App.tsx`, `frontend/src/app/` |
+| App Shell — boot orchestration, providers, error boundary, dev styleguide route | [`app-shell.md`](app-shell.md) | `frontend/src/main.tsx`, `frontend/src/App.tsx`, `frontend/src/app/` |
 | Environment Configuration | [`env.md`](env.md) | `frontend/src/lib/env.ts` |
 | Branded ID Types | [`shared-ids.md`](shared-ids.md) | `frontend/src/shared/types/ids.ts` |
-| Tooling & Build | [`tooling.md`](tooling.md) | `frontend/package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `eslint.config.js`, `.github/workflows/frontend.yml` |
+| Design System — tokens, theme, motion, primitives, compounds, icons | [`design-system.md`](design-system.md) | `frontend/src/design-system/`, `frontend/src/styles/`, `frontend/public/theme-bootstrap.js`, `frontend/src/shared/utils/cn.ts`, `frontend/.storybook/` |
+| Tooling & Build | [`tooling.md`](tooling.md) | `frontend/package.json`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `eslint.config.js`, `.storybook/`, `.github/workflows/frontend.yml` |
 
 ## Not yet built
 
 The following modules have empty stub folders but no implementation. Docs land when the implementation does.
 
-- `design-system` (Phase 2)
 - `features/auth` (Phase 3)
 - `app/router` + guards (Phase 4)
 - `realtime` (Phase 5)

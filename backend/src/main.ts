@@ -1,4 +1,7 @@
 import 'reflect-metadata';
+// Load `.env` into process.env BEFORE any module reads config.
+// Must precede `AppModule` import (transitively imports env.ts via ConfigModule).
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { type NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';

@@ -19,7 +19,7 @@ export const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().max(65535).default(3005),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   APP_NAME: z.string().min(1).default('devdeskchat-backend'),
-  CORS_ORIGINS: csv.default('http://localhost:3005'),
+  CORS_ORIGINS: csv.default('http://localhost:5173'),
   BODY_LIMIT: z.string().min(1).default('2mb'),
   TRUST_PROXY: boolish.default('false'),
 
@@ -29,6 +29,13 @@ export const EnvSchema = z.object({
   PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   PG_SSL: boolish.default('false'),
+  // Verify the server certificate chain. Default true (secure).
+  // Set false ONLY for local dev against a cloud DB whose CA is not in Node's trust store
+  // (e.g. Aiven, Supabase). Production: keep true and supply PG_SSL_CA instead.
+  PG_SSL_REJECT_UNAUTHORIZED: boolish.default('true'),
+  // PEM-encoded CA certificate (or chain). When set, pinned as the trust anchor.
+  // Takes precedence over PG_SSL_REJECT_UNAUTHORIZED.
+  PG_SSL_CA: z.string().min(1).optional(),
 
   // Redis
   REDIS_URL: z.string().url(),
