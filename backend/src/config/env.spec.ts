@@ -1,0 +1,57 @@
+import { describe, expect, it } from 'vitest';
+import { loadEnv } from './env';
+
+const baseEnv = {
+  DATABASE_URL: 'postgres://user:pass@localhost:5432/devdesk',
+  REDIS_URL: 'redis://localhost:6379',
+};
+
+describe('loadEnv', () => {
+  it('parses defaults when only required vars are set', () => {
+    const config = loadEnv(baseEnv);
+    expect(config.NODE_ENV).toBe('development');
+    expect(config.PORT).toBe(3005);
+    expect(config.LOG_LEVEL).toBe('info');
+    expect(config.CORS_ORIGINS).toEqual(['http://localhost:3005']);
+    expect(config.TRUST_PROXY).toBe(false);
+    expect(config.PG_POOL_MAX).toBe(20);
+    expect(config.PG_STATEMENT_TIMEOUT_MS).toBe(5000);
+    expect(config.REDIS_KEY_PREFIX).toBe('devdesk:');
+  });
+
+  it('coerces PORT from string', () => {
+    const config = loadEnv({ ...baseEnv, PORT: '4000' });
+    expect(config.PORT).toBe(4000);
+  });
+
+  it('rejects an out-of-range PORT', () => {
+    expect(() => loadEnv({ ...baseEnv, PORT: '70000' })).toThrow(/PORT/);
+  });
+
+  it('rejects an unknown LOG_LEVEL', () => {
+    expect(() => loadEnv({ ...baseEnv, LOG_LEVEL: 'chatty' })).toThrow(/LOG_LEVEL/);
+  });
+
+  it('splits CORS_ORIGINS on commas', () => {
+    const config = loadEnv({ ...baseEnv, CORS_ORIGINS: 'http://a,http://b , http://c' });
+    expect(config.CORS_ORIGINS).toEqual(['http://a', 'http://b', 'http://c']);
+  });
+
+  it('parses TRUST_PROXY booleans', () => {
+    expect(loadEnv({ ...baseEnv, TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(true);
+    expect(loadEnv({ ...baseEnv, TRUST_PROXY: '1' }).TRUST_PROXY).toBe(true);
+    expect(loadEnv({ ...baseEnv, TRUST_PROXY: 'false' }).TRUST_PROXY).toBe(false);
+  });
+
+  it('rejects when DATABASE_URL is missing', () => {
+    expect(() => loadEnv({ REDIS_URL: baseEnv.REDIS_URL })).toThrow(/DATABASE_URL/);
+  });
+
+  it('rejects when REDIS_URL is missing', () => {
+    expect(() => loadEnv({ DATABASE_URL: baseEnv.DATABASE_URL })).toThrow(/REDIS_URL/);
+  });
+
+  it('rejects an invalid DATABASE_URL', () => {
+    expect(() => loadEnv({ ...baseEnv, DATABASE_URL: 'not-a-url' })).toThrow(/DATABASE_URL/);
+  });
+});

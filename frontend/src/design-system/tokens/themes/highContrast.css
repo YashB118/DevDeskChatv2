@@ -1,0 +1,33 @@
+[data-theme='high-contrast'] {
+  --color-bg-canvas: hsl(0 0% 0%);
+  --color-bg-elevated: hsl(0 0% 6%);
+  --color-bg-sunken: hsl(0 0% 0%);
+  --color-bg-overlay: hsl(0 0% 0% / 0.98);
+
+  --color-fg-primary: hsl(0 0% 100%);
+  --color-fg-secondary: hsl(0 0% 100%);
+  --color-fg-muted: hsl(0 0% 88%);
+  --color-fg-on-accent: hsl(0 0% 0%);
+
+  --color-border-subtle: hsl(0 0% 60%);
+  --color-border-default: hsl(0 0% 80%);
+  --color-border-strong: hsl(0 0% 100%);
+
+  --color-accent: hsl(60 100% 60%);
+  --color-accent-hover: hsl(60 100% 70%);
+  --color-accent-fg: hsl(0 0% 0%);
+
+  --color-success: hsl(120 100% 60%);
+  --color-success-fg: hsl(0 0% 0%);
+  --color-warning: hsl(38 100% 60%);
+  --color-warning-fg: hsl(0 0% 0%);
+  --color-danger: hsl(0 100% 70%);
+  --color-danger-fg: hsl(0 0% 0%);
+
+  --color-focus-ring: hsl(60 100% 60% / 1);
+  --color-overlay-scrim: hsl(0 0% 0% / 0.85);
+
+  --shadow-1: 0 0 0 1px hsl(0 0% 100%);
+  --shadow-2: 0 0 0 2px hsl(0 0% 100%);
+  --shadow-3: 0 0 0 3px hsl(0 0% 100%);
+}

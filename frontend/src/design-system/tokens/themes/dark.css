@@ -1,0 +1,33 @@
+[data-theme='dark'] {
+  --color-bg-canvas: hsl(220 18% 8%);
+  --color-bg-elevated: hsl(220 16% 12%);
+  --color-bg-sunken: hsl(220 18% 6%);
+  --color-bg-overlay: hsl(220 18% 8% / 0.96);
+
+  --color-fg-primary: hsl(220 14% 96%);
+  --color-fg-secondary: hsl(220 10% 80%);
+  --color-fg-muted: hsl(220 8% 60%);
+  --color-fg-on-accent: hsl(220 25% 8%);
+
+  --color-border-subtle: hsl(220 14% 18%);
+  --color-border-default: hsl(220 12% 28%);
+  --color-border-strong: hsl(220 10% 48%);
+
+  --color-accent: hsl(202 90% 60%);
+  --color-accent-hover: hsl(202 90% 66%);
+  --color-accent-fg: hsl(220 25% 8%);
+
+  --color-success: hsl(142 60% 60%);
+  --color-success-fg: hsl(220 25% 8%);
+  --color-warning: hsl(38 92% 64%);
+  --color-warning-fg: hsl(220 25% 8%);
+  --color-danger: hsl(0 78% 68%);
+  --color-danger-fg: hsl(220 25% 8%);
+
+  --color-focus-ring: hsl(202 90% 60% / 0.65);
+  --color-overlay-scrim: hsl(220 30% 2% / 0.7);
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-2: 0 4px 16px rgb(0 0 0 / 0.5);
+  --shadow-3: 0 12px 32px rgb(0 0 0 / 0.6);
+}

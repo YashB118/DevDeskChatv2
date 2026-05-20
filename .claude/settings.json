@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /home/empiric/Documents/DevDeskChatv2/frontend)",
+      "Bash(npm --version)",
+      "Bash(npm test *)",
+      "Bash(chmod +x /home/empiric/Documents/DevDeskChatv2/backend/.husky/pre-commit)",
+      "Bash(VITE_API_BASE_URL=https://api.example.com VITE_SOCKET_URL=https://api.example.com VITE_APP_ENV=production npm run build)"
+    ]
+  }
+}
