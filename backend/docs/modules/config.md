@@ -167,12 +167,21 @@ When extending the schema, add equivalent coverage.
 
 This module sits at the bottom of the dependency graph; no other module may import from it transitively in ways that create cycles.
 
-## 11. Future evolution
+## 11. Phase 5–7 additions
+
+Already live in the schema:
+
+- **Queues (Phase 5):** `QUEUE_PREFIX`, `QUEUE_DEFAULT_ATTEMPTS`, `QUEUE_DEFAULT_BACKOFF_MS`, `QUEUE_REMOVE_ON_COMPLETE`, `QUEUE_REMOVE_ON_FAIL`.
+- **WAHA HTTP client (Phase 6):** `WAHA_BASE_URL` (required), `WAHA_API_KEY?`, `WAHA_TIMEOUT_MS`, `WAHA_MEDIA_TIMEOUT_MS`, `WAHA_RETRY_MAX`, `WAHA_RETRY_BASE_MS`, `WAHA_CB_FAILURE_THRESHOLD`, `WAHA_CB_COOLDOWN_MS`, `WAHA_SESSIONS_CACHE_TTL_MS`, `WAHA_CHATS_CACHE_TTL_MS`, `WAHA_STATUS_CACHE_TTL_MS`.
+- **WAHA NOWEB SQLite store (Phase 6):** `WAHA_STORE_PATH` (required), `WAHA_STORE_REQUIRE_READONLY` (default `false`; flip to `true` in prod where the file is mounted read-only), `WAHA_STORE_CACHE_TTL_MS`.
+- **Webhook ingestion (Phase 7):** `WAHA_WEBHOOK_HMAC_SECRET?` (optional — unset disables HMAC verification), `WAHA_WEBHOOK_HMAC_HEADER` (default `x-webhook-hmac`), `PENDING_MESSAGE_TTL_MS` (default 9000ms — must outlive the WAHA round-trip + webhook delivery latency).
+
+## 12. Future evolution
 
 Anticipated additions in later phases:
 
-- `FRONTEND_URL` for the Socket.IO CORS allowlist (Phase 4).
-- `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_STORE_PATH` (Phase 6).
+- Mute / assignment knobs (Phase 9 — if any are configurable).
+- Observability endpoints + metric-export tokens (Phase 10).
 - Rate-limit knobs, feature flags (Phase 11).
 
 All of these enter through the same schema; do not split into multiple config files.
