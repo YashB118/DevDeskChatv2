@@ -1,6 +1,6 @@
 # Module — Common
 
-> Cross-cutting infrastructure: middleware, exception filter, validation pipe, request-scoped decorators. Anything that applies to many controllers but is not a domain concept lives here.
+> Cross-cutting infrastructure: middleware, exception filter, validation pipe, request-scoped decorators, auth guards. Anything that applies to many controllers but is not a domain concept lives here.
 
 **Files**
 - `src/common/middleware/correlation.middleware.ts`
@@ -9,8 +9,12 @@
 - `src/common/decorators/correlation-id.decorator.ts`
 - `src/common/decorators/current-user.decorator.ts`
 - `src/common/decorators/zod-body.decorator.ts`
+- `src/common/decorators/public.decorator.ts`
+- `src/common/decorators/roles.decorator.ts`
+- `src/common/guards/jwt-auth.guard.ts`
+- `src/common/guards/admin.guard.ts`
 
-There is no `CommonModule` class — each piece is registered where it is used. The middleware is bound by `AppModule`, the filter by `main.ts`, the pipe by individual handlers, and the decorators are pure helper functions.
+There is no `CommonModule` class — each piece is registered where it is used. The middleware is bound by `AppModule`, the filter by `main.ts`, the pipe by individual handlers, the guards via `@UseGuards(...)` on controllers / handlers, and the decorators are pure helper functions.
 
 ---
 
@@ -109,33 +113,85 @@ Parameter decorator that returns `req.correlationId` (typed `string | undefined`
 
 ### 4.2 `@CurrentUser()`
 
-Parameter decorator returning `req.user` typed as `AuthenticatedUser | undefined`. The actual authentication is added by Phase 3 (`JwtAuthGuard`); for now the decorator exists so handlers and their type signatures are stable across phases.
+Parameter decorator returning `req.user` typed as `AuthenticatedUser | undefined`. `JwtAuthGuard` (§5) is what actually populates `req.user`; without the guard the decorator returns `undefined`.
 
-The `AuthenticatedUser` shape declared here is `{ id: string; role: string; email: string }`. Update this interface when the JWT payload is finalised in Phase 3.
+`AuthenticatedUser` is re-exported from `auth.types.ts` as `AuthenticatedRequestUser`: `{ id: string; email: string; role: UserRole }`. `UserRole` lives in `@app/modules/users/user.types` (`ADMIN | DEVELOPER`).
 
 ### 4.3 `@ZodBody(schema)`
 
 Shorthand for `@Body(new ZodValidationPipe(schema))`. Returns a `ParameterDecorator`. Accepts `ZodSchema<unknown>` — the inferred type of the parameter is the responsibility of the call site, which writes `: z.infer<typeof Schema>`.
 
+### 4.4 `@Public()`
+
+Class- or method-level decorator that sets `auth:is-public = true` on the route's metadata. `JwtAuthGuard` short-circuits and returns `true` when it sees this marker. Use it on login, refresh, and any future public webhook handler. Do **not** apply it to anything that mutates user state.
+
+### 4.5 `@Roles(...roles)`
+
+Class- or method-level decorator that sets `auth:required-roles = roles[]` on the route's metadata. Consumed by `AdminGuard` (§6) to narrow which roles may invoke a handler. Default behaviour (no `@Roles`) is admin-only.
+
 ---
 
-## 5. Tests
+## 5. `JwtAuthGuard`
+
+### Purpose
+
+Per-controller (or per-handler) gate that decodes and verifies the access token, populates `req.user`, and short-circuits when the route opts out via `@Public()`.
+
+### Behaviour
+
+- Reflects `auth:is-public` metadata (`@Public()`). If present, returns `true` immediately.
+- Reads the `Authorization` header (case-insensitive). Splits on whitespace; requires `Bearer <token>`. Anything else throws `UnauthorizedError('Missing access token')` (HTTP 401, code `UNAUTHORIZED`).
+- Calls `jwt.verifyAsync<JwtPayload>(token, { algorithms: ['RS256'], issuer, audience, publicKey })`. Any verification failure throws `UnauthorizedError('Invalid access token')` — the underlying reason (expired, bad signature, unknown issuer) is intentionally not surfaced to the client.
+- On success, sets `req.user = { id: payload.sub, email: payload.email, role: payload.role }`.
+
+### Wiring
+
+`AuthModule` re-exports `JwtModule`. Any controller that wants protected routes imports `AuthModule` (or relies on the global instance via DI) and uses `@UseGuards(JwtAuthGuard)`. The guard is not registered globally — protection is opt-in per controller, opt-out via `@Public()`.
+
+### Editing rules
+
+- Do not add new ways to extract a token (e.g. query string, cookie). The contract is `Authorization: Bearer ...`; the refresh cookie is read directly by `AuthController.refresh` and never by the guard.
+- Do not log the token. The guard intentionally throws a generic message.
+- If a future module needs a different audience (e.g. service-to-service), build a separate guard rather than parameterising this one.
+
+## 6. `AdminGuard`
+
+### Purpose
+
+Role check that runs after `JwtAuthGuard`. Rejects requests whose `req.user.role` is not in the required set.
+
+### Behaviour
+
+- Reads `req.user`. If missing (e.g. the controller forgot `JwtAuthGuard`), throws `UnauthorizedError`.
+- Reads `auth:required-roles` metadata (`@Roles(...)`); defaults to `[UserRole.ADMIN]` when absent.
+- If the user's role is not in the set, throws `ForbiddenError('Admin role required')` (HTTP 403, code `FORBIDDEN`).
+- Returns `true` on success.
+
+### Wiring
+
+Apply with `@UseGuards(JwtAuthGuard, AdminGuard)` so the JWT check populates `req.user` first. Combine with `@Roles(UserRole.DEVELOPER)` to expose a route to developers as well as admins, or with `@Roles()` only to lock to a non-default set.
+
+## 7. Tests
 
 - `src/common/middleware/correlation.middleware.spec.ts` — reuse vs generate, malformed header handling.
 - `src/common/filters/all-exceptions.filter.spec.ts` — covers each branch of the mapping table, asserts no stack leaks in the body, asserts custom `AppError` codes pass through unchanged.
+- `src/common/guards/jwt-auth.guard.spec.ts` — public bypass, missing bearer, verify failure, valid token populates `req.user`.
+- `src/common/guards/admin.guard.spec.ts` — admin allowed, developer forbidden by default, `@Roles` override path.
 
-Add new unit tests when adding new branches or decorators. Behavioural changes to the filter or middleware must come with a regression test.
+Add new unit tests when adding new branches or decorators. Behavioural changes to the filter, middleware, or guards must come with a regression test.
 
-## 6. Common editing mistakes
+## 8. Common editing mistakes
 
 - **Throwing `new Error(...)` from a controller.** Use an `AppError` subclass; the generic fallback produces a 500.
 - **Returning a custom error shape from a controller.** Don't — let the filter own the envelope.
 - **Using `class-validator`.** The codebase standardises on Zod. Don't introduce decorators-based DTOs.
 - **Mutating `req.correlationId`.** It is set once and read everywhere after.
 - **Adding a global pipe.** See section 3 above.
+- **Registering `JwtAuthGuard` globally.** Auth is opt-in per controller with `@UseGuards` and opt-out via `@Public()`. A global guard would make `@Public()` the load-bearing decorator and obscure the protection model.
+- **Reading `Authorization` outside the guard.** Controllers should `@CurrentUser()` instead.
 
-## 7. Future evolution
+## 9. Future evolution
 
 - A `RequestContextInterceptor` (Phase 10) that opens an AsyncLocalStorage scope so non-HTTP code (queue handlers, gateway events) can still reach the correlation id without explicit threading.
-- A `RolesGuard` / `JwtAuthGuard` (Phase 3).
-- A WebSocket equivalent of the validation pipe (Phase 4).
+- A WebSocket equivalent of the validation pipe (Phase 4) and a `WsAuthGuard` that reuses `JwtService`.
+- A rate-limit guard factory (Phase 11) that lives next to the auth guards.

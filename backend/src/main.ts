@@ -12,6 +12,7 @@ import { AppModule } from './app.module';
 import { APP_CONFIG } from './config/constants';
 import { type AppConfig } from './config/env';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { SocketRedisAdapter } from './realtime/socket-redis.adapter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -39,6 +40,12 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useGlobalFilters(new AllExceptionsFilter());
+
+  // Install the Socket.IO Redis adapter only after the cache module's Redis
+  // client has been resolved during DI. Doing this before `listen()` ensures
+  // the adapter is in place before any WS upgrade is accepted.
+  app.useWebSocketAdapter(new SocketRedisAdapter(app));
+
   app.enableShutdownHooks();
 
   await app.listen(config.PORT);

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { AppErrorBoundary } from '@/app/errors/AppErrorBoundary';
 import { AppProviders } from '@/app/providers/AppProviders';
-import { BootGate } from '@/app/ui/BootGate';
+import { AppRouter } from '@/app/router/AppRouter';
 import { Styleguide } from '@/app/ui/Styleguide';
 
 function isStyleguidePath(): boolean {
@@ -14,9 +14,7 @@ export function App(): ReactElement {
 
   return (
     <AppErrorBoundary>
-      <AppProviders>
-        {showStyleguide ? <Styleguide /> : <BootGate />}
-      </AppProviders>
+      <AppProviders>{showStyleguide ? <Styleguide /> : <AppRouter />}</AppProviders>
     </AppErrorBoundary>
   );
 }

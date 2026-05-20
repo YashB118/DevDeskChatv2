@@ -33,7 +33,7 @@ Each phase contains:
 | **1** | Foundation: project scaffold, providers shell, typing, env | ✅ Done |
 | **2** | Design system: tokens, theme provider, primitives, motion | ✅ Done |
 | **3** | HTTP layer & authentication | ✅ Done |
-| **4** | Routing & route guards | ⏳ Pending |
+| **4** | Routing & route guards | ✅ Done |
 | **5** | Real-time core: single socket above router, sync controller | ⏳ Pending |
 | **6** | State foundation: TanStack Query, Zustand, IndexedDB persistence | ⏳ Pending |
 | **7** | Chats feature: list, filters, virtualization, sync | ⏳ Pending |
@@ -332,10 +332,12 @@ frontend/src/app/router/
 - Route transitions ≤ 100ms perceived.
 
 ### Final deliverables
-- [ ] Typed `routes` table; no inline route strings in components.
-- [ ] Admin code is not in the developer bundle.
-- [ ] Guards behave correctly across role transitions.
-- [ ] Each route has an error boundary.
+- [x] Typed `routes` table; no inline route strings in components.
+- [x] Admin code is not in the developer bundle.
+- [x] Guards behave correctly across role transitions.
+- [x] Each route has an error boundary.
+
+> **Status: ✅ Complete** — Router scaffolded under [frontend/src/app/router/](frontend/src/app/router/). React Router 7 (`react-router-dom@7.15.1`) data router via [createBrowserRouter](frontend/src/app/router/AppRouter.tsx). Typed route table + builders in [routes.ts](frontend/src/app/router/routes.ts) (`routes.chat(chatId)` consumes branded `ChatId`). Guards under [guards/](frontend/src/app/router/guards/): `ProtectedRoute` (redirects unauthenticated → `/login` with `from` state), `AdminRoute` (non-admin → `/dashboard`), `PublicRoute` (authed → `/dashboard`), `RootRedirect`; each waits on the auth `initializing` status via `BootGate`. Layouts [DashboardLayout](frontend/src/app/router/layouts/DashboardLayout.tsx) + [AdminLayout](frontend/src/app/router/layouts/AdminLayout.tsx) with `NavLink viewTransition`. Pages under [pages/](frontend/src/app/router/pages/): `LoginPage` wraps `LoginForm` and honors `state.from`; `DashboardIndexPage`, `ChatPage` (uses [useChatIdParam](frontend/src/app/router/hooks/useChatIdParam.ts) → branded `ChatId`), `SettingsPage` (wraps `PasswordChangeForm`), `NotFoundPage`. Admin pages live under [pages/admin/](frontend/src/app/router/pages/admin/) and are loaded lazily via `lazy(() => import('./pages/admin'))` + `<Suspense fallback={<BootGate />}>` in [AppRouter](frontend/src/app/router/AppRouter.tsx); the build manifest confirms they live in their own dynamic chunk (`assets/index-*.js`, ~1.74 KB raw / 0.69 KB gz) separate from the entry chunk. [lazyRoutes.ts](frontend/src/app/router/lazyRoutes.ts) exposes a typed `loadAdminChunk()` helper. Per-route `errorElement={<RouteErrorBoundary />}` ([RouteErrorBoundary](frontend/src/app/router/RouteErrorBoundary.tsx)) handles isRouteErrorResponse + thrown errors. `App.tsx` mounts `<AppRouter />` inside `AppProviders` (socket/sync placeholders still wrap above the router; real socket lands Phase 5). Tests (77 pass): [AppRouter.test.tsx](frontend/src/app/router/AppRouter.test.tsx) covers every guard transition + 404 + chat-id param via `<MemoryRouter><Routes>` (sidesteps a jsdom/undici Request incompat with the data router); [useChatIdParam.test.tsx](frontend/src/app/router/hooks/useChatIdParam.test.tsx) covers happy and Zod-style throw paths; [lazyRoutes.test.ts](frontend/src/app/router/lazyRoutes.test.ts) statically asserts admin is only dynamically imported AND inspects `dist/.vite/manifest.json` (when present) to confirm the admin chunk file differs from the entry. View Transitions enabled per-link via `viewTransition` prop on NavLinks and `navigate(..., { viewTransition: true })` (the browser API is invoked automatically by React Router when supported). Bundle: entry 623.78 KB raw / 188.67 KB gz — still above the 250 KB initial-JS budget; admin chunk under 120 KB budget by a wide margin. Initial-JS budget will tighten in Phase 6 (TanStack Query swap-in) and Phase 11 (CI budget gate).
 
 ### AI implementation prompt
 > Build Phase 4 of the DevChatDesk frontend: routing. Use React Router 7 data routers. Create a typed `routes` table in `app/router/routes.ts` and route builders (`routes.chat(chatId)` etc.) that consume branded `ChatId` types. Implement `ProtectedRoute`, `AdminRoute`, `PublicRoute`, `RootRedirect` as composable guards. Build `DashboardLayout` and `AdminLayout` shells with placeholder content. Code-split the entire admin surface via `lazyRoutes.ts` and wrap with `<Suspense>` + `BootGate`. Wrap navigations with the View Transitions API when available. Add a `useChatIdParam()` hook that Zod-parses URL params into the branded `ChatId` type. Add a `RouteErrorBoundary` per route. Provide routing tests: redirects across role transitions, 404 handling, and a build-manifest assertion that the admin chunk is not present in the developer entry bundle.

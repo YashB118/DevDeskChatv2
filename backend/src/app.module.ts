@@ -8,6 +8,7 @@ import { CorrelationMiddleware } from '@app/common/middleware/correlation.middle
 import { TransactionRunner } from '@app/infra/db/transactions';
 import { UsersModule } from '@app/modules/users/users.module';
 import { AuthModule } from '@app/modules/auth/auth.module';
+import { RealtimeModule } from '@app/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from '@app/modules/auth/auth.module';
     HealthModule,
     UsersModule,
     AuthModule,
+    RealtimeModule,
   ],
   providers: [TransactionRunner],
   exports: [TransactionRunner],

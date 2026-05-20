@@ -43,7 +43,9 @@ The current schema accepts these variables. Required variables have no default �
 | `PG_POOL_MAX` | integer in `(0, 200]` | `20` | Maximum pool size per pod. Watch cluster-wide total when scaling horizontally; introduce PgBouncer when total active connections approach Postgres `max_connections`. |
 | `PG_STATEMENT_TIMEOUT_MS` | positive integer | `5000` | Server-side per-statement timeout for HTTP-facing queries. |
 | `PG_IDLE_IN_TX_TIMEOUT_MS` | positive integer | `30000` | Kills sessions left idle inside a transaction (defends against forgotten `BEGIN`). |
-| `PG_SSL` | boolish | `false` | When true, TypeORM connects with `ssl: { rejectUnauthorized: true }`. Must be `true` in production. |
+| `PG_SSL` | boolish | `false` | When true, TypeORM connects with TLS. Auto-promoted to true when `DATABASE_URL` carries `sslmode=require/verify-ca/verify-full`. Must be `true` in production. |
+| `PG_SSL_REJECT_UNAUTHORIZED` | boolish | `true` | Server-cert verification. Set `false` only when local dev hits a managed cloud whose CA is not in Node's trust store AND `PG_SSL_CA` is also unavailable. Pinning a CA via `PG_SSL_CA` overrides this back to `true`. |
+| `PG_SSL_CA` | PEM string | optional | Pinned CA certificate (or chain). Forces verification on. Multi-line PEM must be wrapped in double quotes in `.env`. |
 
 ### Redis
 
@@ -51,6 +53,36 @@ The current schema accepts these variables. Required variables have no default �
 | --- | --- | --- | --- |
 | `REDIS_URL` | URL | *required* | `redis://host:port` (or `rediss://...` for TLS). |
 | `REDIS_KEY_PREFIX` | non-empty string | `devdesk:` | Applied to every key issued through the ioredis client (the prefix is **not** included in keys passed to `EVAL` — beware when writing Lua manually). |
+
+### Auth — JWT (RS256)
+
+| Variable | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `JWT_PRIVATE_KEY` | PEM string | *required* | RS256 signing key. The loader normalizes literal `\n` escapes back to real newlines so single-line `.env` values stay readable. Must include `-----BEGIN`/`-----END` markers. |
+| `JWT_PUBLIC_KEY` | PEM string | *required* | RS256 verification key. Same normalization. Used by `JwtAuthGuard.verifyAsync`. |
+| `JWT_ACCESS_TTL_SECONDS` | positive integer | `900` | Access-token TTL (15 min by default). Forwarded to `JwtModule.signOptions.expiresIn`. |
+| `JWT_ISSUER` | non-empty string | `devdeskchat` | Signed into `iss`; enforced on verify. Use distinct values per environment. |
+| `JWT_AUDIENCE` | non-empty string | `devdeskchat-clients` | Signed into `aud`; enforced on verify. |
+
+Generate keys locally with `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out jwt.key && openssl rsa -in jwt.key -pubout -out jwt.key.pub`. Production should source these from the platform's secret manager / KMS-managed key store and rotate by re-issuing both keys together (RS256 verify can accept the old public key during overlap if the deployment platform exposes a multi-key verify path; today we only carry one).
+
+### Auth — refresh tokens + cookie
+
+| Variable | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `REFRESH_TTL_DAYS` | positive integer | `30` | Lifetime of an issued refresh token row. Sliding (every rotation re-extends). |
+| `REFRESH_COOKIE_NAME` | non-empty string | `dd_refresh` | Cookie name. Renaming requires a coordinated rollout because old cookies cease to be sent. |
+| `REFRESH_COOKIE_PATH` | non-empty string | `/api/auth` | Cookie `Path` attribute. Scopes the cookie to the auth endpoints so unrelated routes do not see it. |
+| `REFRESH_COOKIE_SECURE` | boolish | `true` | `Secure` cookie attribute. Set `false` ONLY for local plain-HTTP dev. |
+| `REFRESH_COOKIE_DOMAIN` | string | optional | Cookie `Domain` attribute. Set when serving over a parent domain (e.g. `.example.com`); leave unset for host-only cookies. |
+
+The cookie also carries `HttpOnly` and `SameSite=Strict` unconditionally — these are not configurable.
+
+### Auth — password hashing
+
+| Variable | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `BCRYPT_COST` | integer in `[4, 15]` | `12` | bcrypt work factor for both password hashes and refresh-token secret hashes. Lower (e.g. `4`) only in tests; production stays at `12` or higher. |
 
 Whenever a new variable is added:
 
@@ -122,6 +154,8 @@ Invalid environment configuration:
 - Missing `DATABASE_URL` → rejection.
 - Missing `REDIS_URL` → rejection.
 - Malformed `DATABASE_URL` → rejection.
+- Missing `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` → rejection.
+- Escaped `\n` sequences in PEM keys normalize to real newlines.
 
 When extending the schema, add equivalent coverage.
 
@@ -137,7 +171,6 @@ This module sits at the bottom of the dependency graph; no other module may impo
 
 Anticipated additions in later phases:
 
-- `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `BCRYPT_COST`, refresh-token lifetimes (Phase 3).
 - `FRONTEND_URL` for the Socket.IO CORS allowlist (Phase 4).
 - `WAHA_BASE_URL`, `WAHA_API_KEY`, `WAHA_STORE_PATH` (Phase 6).
 - Rate-limit knobs, feature flags (Phase 11).

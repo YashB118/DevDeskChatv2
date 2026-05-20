@@ -9,12 +9,12 @@
 DevChatDesk's backend is the single server that fronts a multi-tenant team WhatsApp inbox. It owns:
 
 - Authentication, authorization, audit (✅ Phase 3).
-- Real-time fan-out to operator clients (planned).
+- Real-time fan-out to operator clients (✅ Phase 4).
 - Conversation, message, and assignment state (planned).
 - Background processing of WAHA webhooks (planned).
 - A read-only view of the WAHA NOWEB SQLite store (planned).
 
-Today the codebase has completed **Phase 1 — Foundation**, **Phase 2 — Persistence Layer**, and **Phase 3 — Authentication** of `BACKEND_IMPLEMENTATION_PLAN.md`. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, signs RS256 JWTs, rotates opaque refresh tokens with family-scoped reuse detection, writes append-only audit entries, and returns a normalized error envelope for any unhandled path. All non-health HTTP routes sit under the `/api` global prefix.
+Today the codebase has completed **Phase 1 — Foundation**, **Phase 2 — Persistence Layer**, **Phase 3 — Authentication**, and **Phase 4 — Real-time Core** of `BACKEND_IMPLEMENTATION_PLAN.md`. The server boots, parses env, connects to PostgreSQL via TypeORM and Redis via ioredis, exposes terminus-driven liveness + readiness probes, signs RS256 JWTs, rotates opaque refresh tokens with family-scoped reuse detection, writes append-only audit entries, accepts authenticated Socket.IO connections with Redis-adapter fan-out and a typed event contract, and returns a normalized error envelope for any unhandled path. All non-health HTTP routes sit under the `/api` global prefix.
 
 ## 2. Tech baseline
 
@@ -49,6 +49,7 @@ backend/
 │   ├── modules/
 │   │   ├── users/                    UsersModule: User entity + UserRepository (camelCase ↔ snake_case via naming strategy).
 │   │   └── auth/                     AuthModule: login/refresh/logout/password-change, RS256 JWT, refresh rotation + family revocation, audit_log writes.
+│   ├── realtime/                     RealtimeModule (Phase 4, in progress): Socket.IO gateway with JWT handshake, room conventions, Redis adapter, Zod event contract.
 │   └── infra/
 │       ├── db/                       DatabaseModule, standalone CLI DataSource, SnakeNamingStrategy, withTransaction, migrations/.
 │       ├── cache/                    CacheModule, ioredis provider, CacheService, DistributedLockService.
@@ -71,7 +72,7 @@ The project lives in a subdirectory under the repo root; the GitHub Actions work
 
 ## 4. Composition root
 
-`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, then `AuthModule`. It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet — auth is enforced per-controller via `@UseGuards(JwtAuthGuard)` with a `@Public()` opt-out for the login/refresh endpoints (the `@Public()` metadata is honoured by `JwtAuthGuard` itself).
+`app.module.ts` imports — in order — `ConfigModule`, `LoggerModule`, `DatabaseModule`, `CacheModule`, `HealthModule`, `UsersModule`, `AuthModule`, then `RealtimeModule` (Phase 4). It also registers `TransactionRunner` as a provider and exports it so feature modules can inject a transactional context without importing TypeORM directly. It implements `NestModule.configure` to attach `CorrelationMiddleware` for every route. No global guards or interceptors are registered yet — auth is enforced per-controller via `@UseGuards(JwtAuthGuard)` with a `@Public()` opt-out for the login/refresh endpoints (the `@Public()` metadata is honoured by `JwtAuthGuard` itself).
 
 `main.ts` is the only place the global exception filter is registered (`app.useGlobalFilters(new AllExceptionsFilter())`). It also:
 
@@ -82,6 +83,7 @@ The project lives in a subdirectory under the repo root; the GitHub Actions work
 - Configures CORS from `CORS_ORIGINS` (wildcard becomes `origin: true`, otherwise a string array; `credentials: true`).
 - Sets body-parser JSON + urlencoded limits from `BODY_LIMIT`.
 - Calls `app.setGlobalPrefix('api', { exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }] })` so every business route lives under `/api/...` while `/health/live` and `/health/ready` stay at the root (orchestrator probes assume the bare path).
+- Registers `app.useWebSocketAdapter(new SocketRedisAdapter(app))` *before* `listen()` so the Socket.IO adapter is in place before any WS upgrade is accepted. The adapter pulls the existing ioredis client out of the cache module via DI — no second Redis connection is opened.
 - Calls `app.enableShutdownHooks()` so the `CacheModule.OnApplicationShutdown` and Nest's TypeORM lifecycle close connections cleanly on SIGTERM.
 - Installs process-level `unhandledRejection` / `uncaughtException` handlers that log and exit 1.
 
@@ -318,6 +320,7 @@ If any of these change, update this section and the frontend's [docs/context.md]
 | HealthModule | [modules/health.md](modules/health.md) | ✅ Phase 2 (terminus DB + Redis) |
 | UsersModule | [modules/users.md](modules/users.md) | ✅ Phase 3 |
 | AuthModule | [modules/auth.md](modules/auth.md) | ✅ Phase 3 |
+| RealtimeModule | [modules/realtime.md](modules/realtime.md) | ✅ Phase 4 |
 
 Future phases will add their own entries to this table.
 

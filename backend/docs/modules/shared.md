@@ -35,6 +35,8 @@
 | `ConflictError` | `CONFLICT` | 409 | A concurrent edit, unique-constraint violation, or a lock that could not be acquired. |
 | `ExternalServiceError` | `EXTERNAL_SERVICE_ERROR` | 502 | A downstream provider (WAHA, Redis, Postgres, etc.) failed or refused. Always preserve `cause`. |
 
+Module-local subclasses live next to the module that owns them (e.g. `modules/auth/auth.errors.ts` adds `InvalidCredentialsError`, `InvalidRefreshTokenError`, `UserDisabledError`, `UnauthorizedError`, `ForbiddenError`). The "live in `shared/`" rule applies only to errors that are themselves cross-cutting. Each subclass — wherever it lives — must extend `AppError` so `AllExceptionsFilter` picks it up.
+
 ### Authoring rules
 
 - New subclasses must extend `AppError` directly. Do not chain through other subclasses.
@@ -64,7 +66,7 @@ Brand semantics are achieved via a `Brand<T, K>` helper using a unique symbol. T
 - Validation that a string is actually a UUID (or some other format) happens at the HTTP boundary via Zod. Once that succeeds, brand it once and stop re-checking.
 - Do not introduce new branded types in `shared/` unless the identifier is genuinely cross-cutting. Per-module identifiers belong in the module's own types file.
 
-When Phase 2 introduces TypeORM entities, the branded IDs become the return type of repository methods. Today they exist only so future modules compile without a churn-heavy rename pass.
+`UserId` is in active use today: `UserRepository` returns it on every `UserDomain`, and `AuthController` brands `req.user.id` before passing it to service methods (`changePassword(UserId(user.id), ...)`). `ChatId`, `MessageId`, `SessionId` are reserved for the Phase 8 domain modules.
 
 ## 3. `Result<T, E>`
 

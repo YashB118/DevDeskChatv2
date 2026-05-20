@@ -10,7 +10,8 @@
 - `src/infra/db/case.ts` — `snakeCase` helper used by the strategy and tests.
 - `src/infra/db/transactions.ts` — `withTransaction(...)` + `TransactionRunner` injectable.
 - `src/infra/db/migrations/0001_init.ts` — initial migration (enables `pgcrypto`).
-- `scripts/migrate.ts`, `scripts/migrate-revert.ts` — CLI entry points.
+- `src/infra/db/migrations/0002_auth.ts` — Phase 3 schema: `citext` extension, `user_role` enum, `users`, `refresh_tokens`, range-partitioned `audit_log` + `ensure_audit_log_partition(date)` helper.
+- `scripts/migrate.ts`, `scripts/migrate-revert.ts`, `scripts/seed.ts` — CLI entry points.
 
 ---
 
@@ -118,10 +119,22 @@ The exported `IsolationLevel` type is a string union (`'READ UNCOMMITTED' | 'REA
 
 ## 6. Migrations
 
-- Live under `src/infra/db/migrations/`. The current set is just `0001_init.ts` which enables `pgcrypto` (needed for `gen_random_uuid()`).
-- Filenames follow `<numeric-prefix>_<slug>.ts` ordered chronologically. The class name suffix is the numeric timestamp expected by TypeORM (`Init0001_1700000000000`).
+- Live under `src/infra/db/migrations/`. The current set:
+  - `0001_init.ts` — enables `pgcrypto` (needed for `gen_random_uuid()`).
+  - `0002_auth.ts` — enables `citext`, creates the `user_role` enum (`ADMIN | DEVELOPER`), the `users` table (with `email citext UNIQUE` and the `idx_users_active` partial index `WHERE disabled = false`), the `refresh_tokens` table (FK to users `ON DELETE CASCADE`, self-FK on `replaced_by`, indexes on `family_id`, `(user_id, revoked)`, and the partial `(expires_at) WHERE revoked = false`), and the **range-partitioned** `audit_log` table.
+- Filenames follow `<numeric-prefix>_<slug>.ts` ordered chronologically. The class name suffix is the numeric timestamp expected by TypeORM (`Init0001_1700000000000`, `Auth0002_1700000001000`).
 - Raw SQL inside migrations references **snake_case identifiers** — the naming strategy does not apply to raw SQL. Always use parameter binding for any dynamic value (never string interpolation).
 - Migrations run inside their own transaction (`{ transaction: 'each' }`) so a partial failure rolls back atomically.
+
+### `audit_log` partitioning
+
+`audit_log` is partitioned by RANGE on `created_at`. Postgres requires the PK to include the partition key, so the table's primary key is `(id, created_at)`. The migration also installs a SQL helper:
+
+```sql
+ensure_audit_log_partition(target_month date) -- creates audit_log_YYYY_MM if missing
+```
+
+The migration materializes the current month plus the next two months so a fresh install can write immediately. A future cron (Phase 12) will call `ensure_audit_log_partition` daily to keep the rolling window populated. If you author a new range-partitioned table, copy this pattern: PK includes the partition key, helper SQL function alongside the table, and initial partitions in the migration.
 
 ### Scripts
 
@@ -132,6 +145,7 @@ The exported `IsolationLevel` type is a string union (`'READ UNCOMMITTED' | 'REA
 | `npm run migrate:generate -- src/infra/db/migrations/<Name>` | Generates a migration from the diff between entities and the live schema. |
 | `npm run migrate:create -- src/infra/db/migrations/<Name>` | Writes an empty migration scaffold for hand-authored changes (extensions, partition templates, etc.). |
 | `npm run migrate:show` | Lists applied and pending migrations. |
+| `npm run seed` | Idempotently upserts the default admin user via `scripts/seed.ts`. Reads `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME`, falling back to `admin@test.com` / `password123` / `Default Admin`. Safe to run repeatedly; never deletes data. |
 | `npm run typeorm -- <subcommand>` | Direct TypeORM CLI passthrough. |
 
 All scripts go through `ts-node -r tsconfig-paths/register` so `@app/...` imports resolve in CLI contexts.
@@ -150,13 +164,15 @@ This file must not import anything that depends on Nest decorators — it has to
 
 ## 8. Entity authoring conventions
 
-When Phase 3+ starts adding entities:
+Followed by every Phase 3+ entity (see `modules/users/user.entity.ts`, `modules/auth/refresh-token.entity.ts`, `modules/auth/audit-log.entity.ts`):
 
 - Files live next to the module that owns them (`src/modules/<name>/<entity>.entity.ts`).
 - Property names are camelCase. Database identifiers come from the naming strategy — never hand-pick them via `name:`.
 - UUID PKs default to `gen_random_uuid()` (from `pgcrypto`).
 - Use TypeORM `@Index(['camelOne', 'camelTwo'])` for composite indexes; the strategy emits `idx_<table>_camel_one_camel_two`.
+- Range-partitioned tables include the partition key in the PK and use `@PrimaryColumn` for both columns (TypeORM cannot auto-generate composite PKs).
 - Repositories return domain DTOs via a `toDomain(entity)` mapper. No TypeORM entity escapes the repository boundary.
+- Repository methods accept an optional `EntityManager` so they can participate in a caller's `withTransaction` scope; default to the global manager when omitted.
 - Entities never own business logic — they describe the persistence shape. Behaviour lives in services.
 
 ## 9. Tests
@@ -182,8 +198,9 @@ Testcontainers-backed integration tests (migration apply/revert idempotency, rea
 
 ## 11. Future evolution
 
-- Phase 3 introduces the first concrete entities (`User`, `RefreshToken`, `AuditLog`) and the monthly-partition helper for `audit_log`.
+- Phase 3 introduced the first concrete entities (`User`, `RefreshToken`, `AuditLog`) and the monthly-partition helper for `audit_log` (✅).
 - Phase 5 introduces BullMQ; workers will continue to use the same `TransactionRunner` via DI.
+- Phase 8 introduces additional partitioned tables (`messages`); reuse the `ensure_audit_log_partition` template.
 - Phase 11 may introduce read replicas; route them through the same DataSource options (TypeORM's `replication` block) — do not branch the module.
 
 This module is expected to grow only by adding migrations and (rarely) extending the naming-strategy override set. The runtime surface stays stable.

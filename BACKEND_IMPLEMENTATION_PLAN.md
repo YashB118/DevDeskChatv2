@@ -36,7 +36,7 @@ A phase is complete only when every item under "Final deliverables" is checked.
 | **1** | ✅ Complete | Foundation: NestJS project, config, logging, error infrastructure |
 | **2** | ✅ Complete | Persistence: PostgreSQL (TypeORM via `@nestjs/typeorm`) + Redis + migrations + connection lifecycle |
 | **3** | ✅ Complete | Authentication: JWT (`@nestjs/jwt`), refresh rotation, guards, audit |
-| **4** | ⏳ Pending | Real-time core: Socket.IO via `@nestjs/websockets` + Redis adapter + typed contract |
+| **4** | ✅ Complete | Real-time core: Socket.IO via `@nestjs/websockets` + Redis adapter + typed contract |
 | **5** | ⏳ Pending | Queue infrastructure: BullMQ via `@nestjs/bullmq`, idempotency, retries |
 | **6** | ⏳ Pending | External integration: WAHA client, resilience, SQLite store |
 | **7** | ⏳ Pending | Webhook ingestion: receive, normalize, fan out |
@@ -556,11 +556,13 @@ client.join(roomFor.chat(chatId)) for each authorized chat
 - Connection backpressure: server enforces `pingTimeout: 30s`, `pingInterval: 25s`.
 
 ### Final deliverables
-- [ ] `RealtimeGateway` initialized and listens.
-- [ ] Custom `IoAdapter` registered after Redis is ready; Redis fan-out active.
-- [ ] Auth handshake enforces JWT.
-- [ ] Typed `SocketEmitter` compiles event names ↔ payloads.
-- [ ] Sequence counter increments and reads correctly across pods.
+- [x] `RealtimeGateway` initialized and listens.
+- [x] Custom `IoAdapter` registered after Redis is ready; Redis fan-out active.
+- [x] Auth handshake enforces JWT.
+- [x] Typed `SocketEmitter` compiles event names ↔ payloads.
+- [x] Sequence counter increments and reads correctly across pods.
+
+**Status: ✅ Complete** — implemented in [backend/src/realtime/](backend/src/realtime/). 112 tests pass; lint + typecheck + build green. Cross-pod Redis adapter fan-out is wired in `main.ts` via `SocketRedisAdapter`; a multi-pod Testcontainers smoke test lands with the rest of the live-infra e2e suite in Phase 12.
 
 ### AI implementation prompt
 > Build Phase 4 of the DevChatDesk backend: real-time core. Build `RealtimeModule` with a `RealtimeGateway` (`@WebSocketGateway({ transports: ['websocket'], cors: { origin: env.FRONTEND_URL } })`) wired to a custom `SocketRedisAdapter` (extending `IoAdapter`) that uses `@socket.io/redis-adapter` over the existing ioredis client. Register the adapter from `main.ts` after Redis is ready via `app.useWebSocketAdapter(...)`. Implement a `WsAuthGuard` (`CanActivate`) that verifies access tokens from `client.handshake.auth.token` using `@nestjs/jwt` and disconnects failures immediately; populate `client.data.user`. Auto-join `user:<userId>` on every connection and `admin` for admin users; expose `roomFor` builders so room naming is centralized. Expose the underlying Socket.IO `Server` from the gateway as a provider (`IO_SERVER` token) and build a `SocketEmitter` injectable that maps event names to payload types via a Zod-backed `events.contract.ts`, with payload validation enabled outside production. Implement a Redis-backed monotonic sequence counter for future missed-event resume. Add a `ping/pong` `@SubscribeMessage` end-to-end as a smoke test using `ZodValidationPipe(PingSchema)` on `@MessageBody`. Provide integration tests using `socket.io-client` against a Nest test app covering handshake auth, auto-join behavior, and (optionally) cross-pod fanout with two Testcontainers Redis-connected processes. No domain events yet.

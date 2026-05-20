@@ -16,6 +16,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks: undefined,
