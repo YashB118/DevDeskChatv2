@@ -1,5 +1,10 @@
 import mitt, { type Emitter } from 'mitt';
 import type { UserId } from '@/shared/types/ids';
+import type {
+  SessionStatusPayload,
+  UserUpdatedPayload,
+  FeedbackNewPayload,
+} from './events.contract';
 
 export interface AuthReadyPayload {
   userId: UserId;
@@ -26,6 +31,9 @@ export type AppEvents = {
   'auth:logged-out': AuthLoggedOutPayload;
   'sync:resume': SyncResumePayload;
   'app:error': AppErrorPayload;
+  'sessions:status': SessionStatusPayload;
+  'users:updated': UserUpdatedPayload;
+  'feedback:new': FeedbackNewPayload;
 };
 
 export const eventBus: Emitter<AppEvents> = mitt<AppEvents>();

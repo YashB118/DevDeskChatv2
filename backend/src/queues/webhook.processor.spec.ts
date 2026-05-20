@@ -14,7 +14,7 @@ function fakeJob(envelope: Partial<WebhookEnvelope>, id = 'job-1'): Job<JobEnvel
   return {
     id,
     name: 'webhook.process',
-    queueName: 'webhook:waha',
+    queueName: 'webhook-waha',
     attemptsMade: 0,
     data: { payload: { id: 'evt-1', event: 'message', session: 's1', ...envelope } },
   } as unknown as Job<JobEnvelope<unknown>>;
@@ -88,7 +88,7 @@ describe('WebhookProcessor', () => {
     const bad = {
       id: 'j',
       name: 'webhook.process',
-      queueName: 'webhook:waha',
+      queueName: 'webhook-waha',
       attemptsMade: 0,
       data: { payload: { event: 'message' /* missing id + session */ } },
     } as unknown as Job<JobEnvelope<unknown>>;

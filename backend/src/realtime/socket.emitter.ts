@@ -47,6 +47,20 @@ export class SocketEmitter {
     this.server().to(socketId).emit(event, payload);
   }
 
+  /**
+   * Force-disconnect every active socket in the user's room. Used after an
+   * admin disables a developer account so the user cannot keep using a
+   * pre-existing socket session — the JWT remains valid until expiry but the
+   * transport is severed.
+   */
+  disconnectUser(userId: string): void {
+    try {
+      this.server().in(roomFor.user(userId)).disconnectSockets(true);
+    } catch (err) {
+      this.logger.warn(`disconnectUser(${userId}) failed: ${(err as Error).message}`);
+    }
+  }
+
   private server() {
     // `gateway.server` is populated by Nest after the WS adapter init runs;
     // the type system says it's always set but it isn't at construction

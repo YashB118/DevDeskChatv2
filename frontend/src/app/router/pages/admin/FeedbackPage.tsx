@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
-import { EmptyState } from '@/design-system/compounds/EmptyState';
+import { FeedbackPanel } from '@/features/feedback';
 
 export function FeedbackPage(): ReactElement {
-  return <EmptyState title="Feedback" description="Feedback inbox ships in Phase 9." />;
+  return <FeedbackPanel />;
 }

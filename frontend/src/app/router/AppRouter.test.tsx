@@ -3,6 +3,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Suspense, lazy, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
+import { server } from '@/tests/mocks/server';
+import { env } from '@/lib/env';
+import { ToastProvider } from '@/design-system/primitives/Toast';
 import { resetAuthState, setAuthState } from '@/features/auth/store/auth.store';
 import { BootGate } from '@/app/ui/BootGate';
 import { ProtectedRoute } from './guards/ProtectedRoute';
@@ -52,6 +56,7 @@ function renderAt(path: string): ReturnType<typeof render> {
   });
   return render(
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
         <Route path="/" element={<RootRedirect />} />
@@ -77,6 +82,7 @@ function renderAt(path: string): ReturnType<typeof render> {
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
       </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -115,6 +121,11 @@ describe('AppRouter — guards', () => {
   });
 
   it('renders admin shell for an admin user at /admin/sessions', async () => {
+    server.use(
+      http.get(`${env.VITE_API_BASE_URL}/api/sessions`, () =>
+        HttpResponse.json({ sessions: [] }),
+      ),
+    );
     setAuthState({
       status: 'authenticated',
       user: { id: 'u2', email: 'a@example.com', displayName: 'Admin', role: 'ADMIN' },
@@ -124,7 +135,7 @@ describe('AppRouter — guards', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: /^Admin$/i })).toBeInTheDocument();
     });
-    expect(await screen.findByText(/Session management ships/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /WAHA Sessions/i })).toBeInTheDocument();
   });
 
   it('redirects an authenticated user away from /login to /dashboard', async () => {

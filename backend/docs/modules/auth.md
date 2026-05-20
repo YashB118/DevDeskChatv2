@@ -98,7 +98,12 @@ Access token payload (`auth.types.ts:JwtPayload`):
 
 Every state-changing operation calls `AuthRepository.writeAudit(event, userId, payload?, manager?)`. Inside a transaction, the audit write rides the same `EntityManager` so the row commits with the state change (or rolls back together).
 
-`AuditEvent` is a string union — extend it in `auth.types.ts` when introducing a new event class; do not freelance event names. Events currently in use: `auth.login.success | auth.login.failure | auth.refresh.success | auth.refresh.reuse | auth.refresh.invalid | auth.logout | auth.password.change`.
+`AuditEvent` is a string union — extend it in `auth.types.ts` when introducing a new event class; do not freelance event names. Events currently in use:
+
+- Auth (Phase 3): `auth.login.success`, `auth.login.failure`, `auth.refresh.success`, `auth.refresh.reuse`, `auth.refresh.invalid`, `auth.logout`, `auth.password.change`.
+- Users (Phase 9, written by `UsersService`): `user.create`, `user.update`, `user.disable`, `user.enable`, `user.password.reset`.
+- Assignments (Phase 9, written by `AssignmentsService`): `assignment.create`, `assignment.remove`.
+- Mute (Phase 9, written by `MuteService`): `mute.chat.set`, `mute.global.set`.
 
 `audit_log` is range-partitioned monthly by `created_at` (see [db.md](db.md) §6). New events incur no schema work — the table accepts any `event` string.
 

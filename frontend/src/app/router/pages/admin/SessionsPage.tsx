@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
-import { EmptyState } from '@/design-system/compounds/EmptyState';
+import { SessionsPanel } from '@/features/sessions';
 
 export function SessionsPage(): ReactElement {
-  return <EmptyState title="Sessions" description="Session management ships in Phase 9." />;
+  return <SessionsPanel />;
 }

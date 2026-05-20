@@ -1,12 +1,16 @@
 # Module — Users
 
-> Owns the `users` table and the `UserRepository`. No HTTP surface yet — admin CRUD lands in Phase 9. AuthModule is the only consumer today.
+> Owns the `users` table, the `UserRepository`, and the admin CRUD HTTP surface (`/api/admin/users`). AuthModule still drives credential checks; Phase 9 added the admin lifecycle (create, update, enable/disable, password reset, list).
 
 **Files**
-- `src/modules/users/users.module.ts` — composition (`TypeOrmModule.forFeature([UserEntity])`, exports `UserRepository`).
+- `src/modules/users/users.module.ts` — composition: `TypeOrmModule.forFeature([UserEntity])`, `forwardRef(() => AuthModule)` (so `UsersService` can inject `AuthRepository` for refresh-family revocation + audit writes), `RealtimeModule` (for `SocketEmitter.disconnectUser`). Exports `UserRepository` + `UsersService`.
 - `src/modules/users/user.entity.ts` — `users` table mapping (`citext` email, `user_role` enum, soft-disable flag).
-- `src/modules/users/user.repository.ts` — find / create / upsert / update-password.
+- `src/modules/users/user.repository.ts` — find / create / upsert / update-password / list / update / setDisabled. All write methods accept an optional `EntityManager`.
 - `src/modules/users/user.types.ts` — `UserRole` enum, `UserDomain` / `UserWithCredentials` interfaces.
+- `src/modules/users/users.service.ts` — admin CRUD: `create`, `update`, `setDisabled`, `resetPassword`. Disable + reset run inside `TransactionRunner.run` and call `SocketEmitter.disconnectUser` outside the transaction.
+- `src/modules/users/users.controller.ts` — `/api/admin/users` (guarded by `JwtAuthGuard + AdminGuard`).
+- `src/modules/users/users.schema.ts` — `CreateUserSchema`, `UpdateUserSchema`, `AdminPasswordResetSchema`, `ListUsersQuerySchema`.
+- `src/modules/users/users.errors.ts` — `UserAlreadyExistsError` (409), `UserNotFoundError` (404).
 
 ---
 
@@ -49,10 +53,26 @@ All methods accept an optional `EntityManager` so the caller can pin the operati
 | `findByIdWithCredentials(id)` | `UserWithCredentials \| null` | Used by password-change verify. |
 | `findByEmail(email)` | `UserWithCredentials \| null` | Email lowercased before lookup; `citext` makes the query case-insensitive but normalization keeps logs consistent. |
 | `create(input)` | `UserDomain` | Email lowercased on insert. |
-| `updatePasswordHash(id, hash)` | `void` | Bcrypt hash supplied by the caller (AuthService); never accepts plaintext. |
+| `updatePasswordHash(id, hash)` | `void` | Bcrypt hash supplied by the caller; never accepts plaintext. |
 | `upsertByEmail(input)` | `UserDomain` | Idempotent. Used by `scripts/seed.ts`. |
+| `list(options)` | `UserDomain[]` | `includeDisabled` filters the partial active index; cursor / pagination via `limit + offset`. |
+| `update(id, patch)` | `UserDomain \| null` | Only `displayName` and `role` are accepted — email + password go through dedicated endpoints. |
+| `setDisabled(id, disabled)` | `void` | Flips the soft-delete flag. Service layer pairs this with refresh-family revocation + socket disconnect. |
 
-No bulk operations yet — they will land alongside the admin CRUD endpoints in Phase 9.
+## 3a. HTTP surface (`/api/admin/users`, admin-only)
+
+| Verb | Path | Body / Query | Result |
+| --- | --- | --- | --- |
+| `GET` | `/api/admin/users` | `includeDisabled?`, `limit?`, `offset?` | `{ users: UserDomain[] }` |
+| `GET` | `/api/admin/users/:id` | — | `{ user: UserDomain }` |
+| `POST` | `/api/admin/users` | `CreateUserSchema` | `{ user: UserDomain }`; audits `user.create`. |
+| `PATCH` | `/api/admin/users/:id` | `UpdateUserSchema` | `{ user: UserDomain }`; audits `user.update`. |
+| `POST` | `/api/admin/users/:id/disable` | — | `withTransaction(setDisabled + revokeAllForUser + writeAudit('user.disable'))`, then `SocketEmitter.disconnectUser`. Returns `{ user: UserDomain }`. |
+| `POST` | `/api/admin/users/:id/enable` | — | Single `setDisabled(false)` inside `withTransaction` + `writeAudit('user.enable')`. No socket disconnect (re-login is unnecessary). Returns `{ user: UserDomain }`. |
+| `POST` | `/api/admin/users/:id/password-reset` | `AdminPasswordResetSchema` | bcrypt-hash, `withTransaction(updatePasswordHash + revokeAllForUser + writeAudit('user.password.reset'))`, then disconnect sockets. Returns 204. |
+| `DELETE` | `/api/admin/users/:id` | — | Soft delete via `setDisabled(true)` (preserves audit history). Returns `{ user: UserDomain }`. |
+
+All routes sit behind `@UseGuards(JwtAuthGuard, AdminGuard)`. Bodies are Zod-validated via `ZodValidationPipe`. UUID params go through `ParseUUIDPipe`.
 
 ## 4. Schema (recap — see [db.md](db.md) for the migration)
 
@@ -85,10 +105,9 @@ Notes:
 
 ## 6. Tests
 
-Covered transitively by `auth.service.spec.ts` (in-memory user-repo fake exercises `findByEmail`, `findById`, `findByIdWithCredentials`, `updatePasswordHash`). Dedicated repository tests against a Testcontainers Postgres land with Phase 12 alongside the rest of the live integration suite.
+`users.service.spec.ts` covers: duplicate-email rejection, bcrypt + audit write on create, disable revokes refresh-token families and severs sockets while enable does neither, missing-target rejection, admin password reset rehashes / revokes / disconnects. AuthService's `users.service.spec.ts` still exercises `findByEmail` / `findById` / `findByIdWithCredentials` / `updatePasswordHash` transitively. Live Testcontainers coverage lands in Phase 12.
 
 ## 7. Future evolution
 
-- Phase 9 adds admin CRUD endpoints (`POST /api/users`, `PATCH /api/users/:id`, `DELETE /api/users/:id`, enable/disable, password reset by admin). The repository will gain `list`, `paginate`, and `setDisabled` methods; HTTP routes are gated by `@UseGuards(JwtAuthGuard, AdminGuard)`.
-- Phase 9 also adds the developer-assignments side table; `users` itself stays minimal.
 - A future `lastLoginAt` column may be added for the admin UI; populate from `AuthService.login` inside the existing `withTransaction` block so it does not race with audit-log writes.
+- Phase 11 will likely add login-attempt + admin-CRUD rate limiters on the controller.

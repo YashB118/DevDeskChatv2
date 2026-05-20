@@ -19,8 +19,8 @@
 
 ## 2. `AppModule`
 
-- Decorated with imports in order: `ConfigModule` (must parse first because it is `@Global()` and feeds every other factory), `LoggerModule`, `DatabaseModule` (`@Global`, opens TypeORM during Nest bootstrap), `CacheModule` (`@Global`, opens the ioredis client), `HealthModule` (depends on both for its terminus probes), `UsersModule`, `AuthModule`, `RealtimeModule` (Phase 4 — the Socket.IO gateway, which imports `AuthModule` for `JwtService`). `AuthModule` must come after `UsersModule` because it imports `UserRepository`; `RealtimeModule` must come after `AuthModule` for the same reason.
-- Registers `TransactionRunner` (from `@app/infra/db/transactions`) as a provider and re-exports it so any feature module can inject it without importing TypeORM directly.
+- Decorated with imports in order: `ConfigModule` (must parse first because it is `@Global()` and feeds every other factory), `LoggerModule`, `DatabaseModule` (`@Global`, opens TypeORM during Nest bootstrap), `CacheModule` (`@Global`, opens the ioredis client), `HealthModule` (depends on both for its terminus probes), `UsersModule`, `AuthModule`, `RealtimeModule`, `WahaModule`, `WahaStoreModule`, `SessionsModule`, `MessagesModule`, `AssignmentsModule`, `MuteModule`, `ChatsModule`, `FeedbackModule`, `WebhooksModule`, `QueueModule`. `UsersModule` ↔ `AuthModule` declare each other through `forwardRef` because Phase 9's admin user CRUD revokes refresh-token families through `AuthRepository`. `ChatsModule` depends on `AssignmentsModule` (visibility filter) and `MuteModule` (chat-list enrichment); `MuteModule` depends on `AssignmentsModule` (developer authorization check).
+- Each feature module that touches multi-row writes registers `TransactionRunner` (from `@app/infra/db/transactions`) in its own providers list.
 - Implements `NestModule` and mounts `CorrelationMiddleware` for `'*'` (every route, including future ones). This is the only middleware bound at this layer — anything else belongs in `main.ts` or in a feature module.
 - Holds no controllers of its own. It is a composition seam plus the home of one cross-cutting provider.
 

@@ -1,27 +1,37 @@
 import { Injectable } from '@nestjs/common';
+import { ForbiddenError } from '@app/modules/auth/auth.errors';
+import { AssignmentRepository } from '@app/modules/assignments/assignment.repository';
 import { type UserDomain, UserRole } from '@app/modules/users/user.types';
 
 /**
- * Visibility gate for chat reads/writes. Phase 8 ships the admin path and
- * a permissive developer path; Phase 9 narrows the developer path against
- * the `developer_assignments` table.
+ * Visibility + write gate for chats. Admins see and act on every chat;
+ * developers are restricted to chats that have an active row in
+ * `developer_assignments`.
  */
 @Injectable()
 export class ChatPolicy {
-  filterVisibleChatIds(user: UserDomain, chatIds: string[]): string[] {
+  constructor(private readonly assignments: AssignmentRepository) {}
+
+  async filterVisibleChatIds(user: UserDomain, chatIds: string[]): Promise<string[]> {
     if (user.role === UserRole.ADMIN) return chatIds;
-    // Phase-8 stub: developers see all chats. Phase 9 joins against
-    // developer_assignments to restrict by active assignment.
-    return chatIds;
+    if (chatIds.length === 0) return [];
+    const assigned = new Set(await this.assignments.listActiveChatIdsForUser(user.id));
+    return chatIds.filter((id) => assigned.has(id));
   }
 
-  canReadChat(user: UserDomain, _chatId: string): boolean {
+  async canReadChat(user: UserDomain, chatId: string): Promise<boolean> {
     if (user.role === UserRole.ADMIN) return true;
-    return true;
+    const row = await this.assignments.findActive(user.id, chatId);
+    return row !== null;
   }
 
-  canWriteChat(user: UserDomain, _chatId: string): boolean {
-    if (user.role === UserRole.ADMIN) return true;
-    return true;
+  async canWriteChat(user: UserDomain, chatId: string): Promise<boolean> {
+    return this.canReadChat(user, chatId);
+  }
+
+  async assertCanWrite(user: UserDomain, chatId: string): Promise<void> {
+    if (!(await this.canWriteChat(user, chatId))) {
+      throw new ForbiddenError('Chat not assigned to user');
+    }
   }
 }

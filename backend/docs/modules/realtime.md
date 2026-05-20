@@ -50,10 +50,14 @@ Inbound events (client → server) are validated through `WsZodValidationPipe` a
 | Event | Payload | Behavior |
 |---|---|---|
 | `ping` | `{ nonce: string, ts?: number }` | Server responds with `pong { nonce, serverTs, seq }` after `INCR`ing the user's sequence. |
-| `chats:join` | `{ chatIds: string[] }` (uuid, 1–100) | Joins requested chat rooms. Authorization based on assignments lands in Phase 9. |
+| `chats:join` | `{ chatIds: string[] }` (uuid, 1–100) | Joins requested chat rooms. Assignment-based authorization is enforced in the HTTP path; gating the room-join itself remains permissive so the client controls subscription. |
 | `chats:leave` | `{ chatIds: string[] }` (uuid, 1–100) | Leaves the rooms. |
 
 Outbound events (server → client) flow through `SocketEmitter`. `events.contract.ts` lists the Zod schema for each — `SocketEmitter.checkPayload` validates against it in non-production builds, surfacing contract drift as a server-side error log rather than a client-side surprise.
+
+Outbound surface today: `pong`, `error:invalid_payload`, `message:new`, `message:ack`, `message:edited`, `message:deleted`, `message:reaction`, `session:status`, `group:participants` (Phase 8), `chat:assigned`, `chat:unassigned` (Phase 9). The Phase 9 additions are routed by `AssignmentsService` to both `user:<dev>` and `admin` on every create / remove mutation.
+
+`SocketEmitter.disconnectUser(userId)` (Phase 9) is the imperative complement: `UsersService.setDisabled(_, true, _)` and `UsersService.resetPassword(...)` call it outside their transactions so an admin disabling a developer immediately severs any live socket session.
 
 ## 4. Rooms
 

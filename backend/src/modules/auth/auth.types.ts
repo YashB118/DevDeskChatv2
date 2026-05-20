@@ -45,4 +45,13 @@ export type AuditEvent =
   | 'auth.refresh.reuse'
   | 'auth.refresh.invalid'
   | 'auth.logout'
-  | 'auth.password.change';
+  | 'auth.password.change'
+  | 'user.create'
+  | 'user.update'
+  | 'user.disable'
+  | 'user.enable'
+  | 'user.password.reset'
+  | 'assignment.create'
+  | 'assignment.remove'
+  | 'mute.chat.set'
+  | 'mute.global.set';

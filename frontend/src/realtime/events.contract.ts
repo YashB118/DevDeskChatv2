@@ -131,6 +131,37 @@ export const MessageReactionSchema = z.object({
 });
 export type MessageReactionPayload = z.infer<typeof MessageReactionSchema>;
 
+// ---- Admin / sessions domain events (server → client) ----
+
+export const SessionStatusValues = [
+  'STARTING',
+  'SCAN_QR_CODE',
+  'WORKING',
+  'STOPPED',
+  'FAILED',
+] as const;
+export const SessionStatusEnum = z.enum(SessionStatusValues);
+export type SessionStatusValue = z.infer<typeof SessionStatusEnum>;
+
+export const SessionStatusSchema = z.object({
+  name: z.string().min(1),
+  status: SessionStatusEnum,
+});
+export type SessionStatusPayload = z.infer<typeof SessionStatusSchema>;
+
+export const UserUpdatedSchema = z.object({
+  id: z.string().min(1),
+  disabled: z.boolean().optional(),
+  role: z.enum(['ADMIN', 'DEVELOPER']).optional(),
+});
+export type UserUpdatedPayload = z.infer<typeof UserUpdatedSchema>;
+
+export const FeedbackNewSchema = z.object({
+  id: z.string().min(1),
+  ts: z.number().int().nonnegative(),
+});
+export type FeedbackNewPayload = z.infer<typeof FeedbackNewSchema>;
+
 export const OutboundEvents = {
   pong: PongSchema,
   'error:invalid_payload': InvalidPayloadSchema,
@@ -143,6 +174,9 @@ export const OutboundEvents = {
   'chat:unassigned': ChatUnassignedSchema,
   'chat:read': ChatReadSchema,
   'chat:muted': ChatMutedSchema,
+  'session:status': SessionStatusSchema,
+  'user:updated': UserUpdatedSchema,
+  'feedback:new': FeedbackNewSchema,
 } as const;
 
 export type OutboundEventName = keyof typeof OutboundEvents;

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
-import { EmptyState } from '@/design-system/compounds/EmptyState';
+import { AssignmentsPanel } from '@/features/assignments';
 
 export function AssignmentsPage(): ReactElement {
-  return <EmptyState title="Assignments" description="Assignment panel ships in Phase 9." />;
+  return <AssignmentsPanel />;
 }

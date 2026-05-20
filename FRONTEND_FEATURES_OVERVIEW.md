@@ -48,8 +48,8 @@ The middle column in [DashboardLayout](frontend/src/app/router/layouts/Dashboard
 - Avatar (image + initials fallback), title, last message preview, timestamp, unread count [Badge](frontend/src/design-system/primitives/Badge), mute glyph.
 - Phone numbers never shown; default title from the DTO.
 
-### Session Switcher ⏳
-- [SessionSwitcher](frontend/src/features/chats/components/SessionSwitcher/SessionSwitcher.tsx) is a placeholder dropdown — the full sessions feature (live WAHA list) lands in Phase 9.
+### Session Switcher 🟡
+- [SessionSwitcher](frontend/src/features/chats/components/SessionSwitcher/SessionSwitcher.tsx) sidebar dropdown still uses a static list. Wiring it to `features/sessions` data (now real) is a small UX follow-up; the underlying sessions feature shipped in Phase 9.
 
 ### Filtering & Search ✅
 - Real-time client-side search ([ChatSearchBar](frontend/src/features/chats/components/ChatSearchBar/ChatSearchBar.tsx)) over title + last-message preview.
@@ -59,7 +59,7 @@ The middle column in [DashboardLayout](frontend/src/app/router/layouts/Dashboard
 - Virtualized infinite scroll with `react-virtuoso` and cursor pagination in [useChatList.ts](frontend/src/features/chats/hooks/useChatList.ts).
 
 ### Context Menu ✅ (Radix dropdown surface)
-- [ChatContextMenu](frontend/src/features/chats/components/ChatContextMenu/ChatContextMenu.tsx) — mark-read, mute/unmute. Assign action exists in [useChatActions.ts](frontend/src/features/chats/hooks/useChatActions.ts); UI surface lands with admin features (Phase 9). Native right-click binding is queued for Phase 10 UX pass.
+- [ChatContextMenu](frontend/src/features/chats/components/ChatContextMenu/ChatContextMenu.tsx) — mark-read, mute/unmute. Assign action exists in [useChatActions.ts](frontend/src/features/chats/hooks/useChatActions.ts) and is now exposed via the admin [AssignmentsPanel](frontend/src/features/assignments/components/AssignmentsPanel/AssignmentsPanel.tsx); per-chat assign affordance in the chat row + native right-click binding are queued for Phase 10 UX pass.
 
 ### Mark as Read / Mute Toggle ✅
 - Optimistic mutations in [useChatActions.ts](frontend/src/features/chats/hooks/useChatActions.ts) with snapshot rollback on failure.
@@ -174,21 +174,23 @@ Phase 10 work. The `features/notifications/` folder is a stub (`index.ts` only).
 
 ---
 
-## 8. Admin Dashboard ⏳ Deferred
+## 8. Admin Dashboard ✅ Shipped
 
-The `/admin` route, [AdminLayout](frontend/src/app/router/layouts/AdminLayout.tsx), and lazily-loaded placeholder pages ([pages/admin/](frontend/src/app/router/pages/admin/)) ship today, but every panel is a stub:
+The `/admin` route, [AdminLayout](frontend/src/app/router/layouts/AdminLayout.tsx), and lazily-loaded admin sub-pages ([pages/admin/](frontend/src/app/router/pages/admin/)) now host real features. All admin code remains in a dedicated chunk (`dist/.vite/manifest.json` confirms ~25 KB raw / 6.5 KB gz, separate from the entry bundle) — non-admins never download this code.
 
 | Panel | Status |
 |---|---|
-| Session Management | ⏳ Stub page; full feature in Phase 9 |
-| QR Code Panel | ⏳ Pending |
-| Chat Assignment Panel | ⏳ Pending (mutation hook exists in `useChatActions.assign`) |
-| Developer Management Panel | ⏳ Pending |
-| Feedback Viewing Panel | ⏳ Pending |
-| Global Mute Toggle | ⏳ Pending |
+| Session Management | ✅ [SessionsPanel](frontend/src/features/sessions/components/SessionsPanel/SessionsPanel.tsx) — create/start/stop/delete + status badge |
+| QR Code Panel | ✅ [QRPanel](frontend/src/features/sessions/components/QRPanel/QRPanel.tsx) — enabled iff status `SCAN_QR_CODE`, auto-refreshes on socket flip |
+| Chat Assignment Panel | ✅ [AssignmentsPanel](frontend/src/features/assignments/components/AssignmentsPanel/AssignmentsPanel.tsx) — virtualized list, optimistic assign/unassign w/ rollback |
+| Developer Management Panel | ✅ [DeveloperManagementPanel](frontend/src/features/admin/components/DeveloperManagementPanel/DeveloperManagementPanel.tsx) — create/disable/delete via RHF + Zod |
+| Feedback Viewing Panel | ✅ [FeedbackPanel](frontend/src/features/feedback/components/FeedbackPanel/FeedbackPanel.tsx) — paginated inbox + mark-read |
+| Global Mute Toggle | ✅ [GlobalMuteToggle](frontend/src/features/mute/components/GlobalMuteToggle/GlobalMuteToggle.tsx) — optimistic flip mounted inside the Users page |
 | Admin Chat View (read any chat) | ⏳ Pending (backend dependency) |
 
-The admin chunk IS code-split today (verified in `dist/.vite/manifest.json`) so non-admins never download this code.
+Realtime: [sessions.sync.ts](frontend/src/features/sessions/sync/sessions.sync.ts) handles `session:status` → cache mutation + `sessions:status` event-bus fanout for QR refetch. [assignments.sync.ts](frontend/src/features/assignments/sync/assignments.sync.ts) handles `chat:assigned`/`chat:unassigned`. [admin.sync.ts](frontend/src/features/admin/sync/admin.sync.ts) handles `user:updated`. [feedback.sync.ts](frontend/src/features/feedback/sync/feedback.sync.ts) handles `feedback:new` (refetches `limit=1` to materialize body). All registered at boot via [app/sync/featureSync.ts](frontend/src/app/sync/featureSync.ts).
+
+Cross-feature plumbing — [lib/data/useDirectory.ts](frontend/src/lib/data/useDirectory.ts) exposes the developer list keyed by `keys.users()` (same cache slot as admin's `useUsers`) so AssignmentsPanel can render its assignee `<select>` without crossing feature boundaries. [design-system/compounds/ConfirmDialog/](frontend/src/design-system/compounds/ConfirmDialog/ConfirmDialog.tsx) is the shared destructive-action confirmer.
 
 ---
 
@@ -200,15 +202,15 @@ The admin chunk IS code-split today (verified in `dist/.vite/manifest.json`) so 
 
 ---
 
-## 10. WAHA Session Status Monitoring ⏳ Deferred
+## 10. WAHA Session Status Monitoring ✅ Shipped (admin view)
 
-Phase 9. The connection-status banner ([ConnectionBanner](frontend/src/realtime/ConnectionBanner.tsx)) is shipped for the SOCKET, but the WAHA-session-status banner is a separate concern that lives in `features/sessions/` (currently a stub).
+[SessionsPanel](frontend/src/features/sessions/components/SessionsPanel/SessionsPanel.tsx) renders each WAHA session with a [SessionStatusBadge](frontend/src/features/sessions/components/SessionStatusBadge/SessionStatusBadge.tsx) (STARTING / SCAN_QR_CODE / WORKING / STOPPED / FAILED), live-updated by the `session:status` socket event ([sessions.sync.ts](frontend/src/features/sessions/sync/sessions.sync.ts)). The connection-status banner ([ConnectionBanner](frontend/src/realtime/ConnectionBanner.tsx)) covers the socket itself; the dashboard-level WAHA banner (visible to developers) is queued for Phase 10 UX polish.
 
 ---
 
-## 11. Feedback ⏳ Deferred
+## 11. Feedback ✅ Shipped (admin viewer)
 
-`features/feedback/` is a stub. Submission + viewing UI lands in Phase 9.
+[FeedbackPanel](frontend/src/features/feedback/components/FeedbackPanel/FeedbackPanel.tsx) lists submissions w/ "New" badge + mark-read + Load-more. Socket `feedback:new` prepends fresh items via [feedback.sync.ts](frontend/src/features/feedback/sync/feedback.sync.ts). Developer-side submission UI ships with the broader Settings work in Phase 10.
 
 ---
 
@@ -252,7 +254,7 @@ Phase 9. The connection-status banner ([ConnectionBanner](frontend/src/realtime/
 - Tokens: CSS variables across `light`, `dark`, `high-contrast` themes in [design-system/tokens/themes/](frontend/src/design-system/tokens/themes/).
 - [ThemeProvider](frontend/src/design-system/theme/) sets `data-theme` on `<html>`; synchronous bootstrap script in `index.html` (`public/theme-bootstrap.js`) applies the saved theme before React mounts — no FOUC. SHA-pinning queued for Phase 11.
 - Primitives (Radix + class-variance-authority): Button, Input, Textarea, Dialog, Popover, Tooltip, Dropdown, Switch, Checkbox, Tabs, Toast, Avatar, Badge, Spinner, Skeleton.
-- Compounds: EmptyState, SectionHeader, Tag, IconButton.
+- Compounds: EmptyState, SectionHeader, Tag, IconButton, ConfirmDialog.
 - Motion system in [design-system/motion/](frontend/src/design-system/motion/): reusable variants + `usePrefersReducedMotion` hook that collapses transitions to instant.
 - Storybook 8 with `addon-a11y` + theme toolbar; one story per primitive/compound.
 - Dev-only `/__styleguide` route renders every component for visual smoke.
@@ -265,7 +267,7 @@ Phase 9. The connection-status banner ([ConnectionBanner](frontend/src/realtime/
 - Vitest + React Testing Library + `vitest-axe`.
 - MSW shared server in [tests/mocks/server.ts](frontend/src/tests/mocks/server.ts), lifecycle wired in [tests/setup.ts](frontend/src/tests/setup.ts).
 - `fake-indexeddb/auto` powers persistence tests.
-- **137 tests pass** across 34 files (foundation, design system, HTTP/auth/refresh queue, router guards, real-time core, persistence, chats sync + store + actions, messages optimistic + composer interaction).
+- **152 tests pass** across 40 files (foundation, design system, HTTP/auth/refresh queue, router guards, real-time core, persistence, chats sync + store + actions, messages optimistic + composer interaction, sessions/assignments/admin/feedback/mute sync mutations + MSW round-trips).
 - Playwright E2E and Chromatic visual regression are Phase 12.
 - Coverage thresholds (75% features, 90% realtime/lib) are not yet gated in CI.
 
@@ -294,8 +296,8 @@ Phase 9. The connection-status banner ([ConnectionBanner](frontend/src/realtime/
 
 | Theme | Phase | What's missing |
 |---|---|---|
-| Admin features | 9 | Sessions panel, QR panel, assignments panel, user CRUD, feedback viewer, global mute |
-| Sessions monitoring | 9 | Live WAHA session list, QR refresh on `session:status` |
+| Admin features | 9 ✅ | Sessions panel, QR panel, assignments panel, user CRUD, feedback viewer, global mute — shipped |
+| Sessions monitoring | 9 ✅ | Live WAHA session list, QR refresh on `session:status` — shipped |
 | Notifications | 10 | Desktop notifications service, sound, favicon badge, permission banner, settings screen |
 | Offline send queue | 10 | `navigator.onLine` queue + retry on `online` |
 | Reduced-motion full audit | 10 | Already supported by the hook; full sweep + axe sweep pending |

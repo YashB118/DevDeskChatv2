@@ -28,6 +28,17 @@ export interface CreateUserInput {
   displayName: string;
 }
 
+export interface UpdateUserInput {
+  displayName?: string;
+  role?: UserRole;
+}
+
+export interface ListUsersOptions {
+  includeDisabled?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 @Injectable()
 export class UserRepository {
   constructor(
@@ -96,5 +107,34 @@ export class UserRepository {
       return toDomain(reloaded);
     }
     return this.create(input, manager);
+  }
+
+  async list(options: ListUsersOptions = {}, manager?: EntityManager): Promise<UserDomain[]> {
+    const repo = this.scoped(manager);
+    const qb = repo.createQueryBuilder('u');
+    if (options.includeDisabled !== true) qb.where('u.disabled = :disabled', { disabled: false });
+    qb.orderBy('u.createdAt', 'DESC');
+    if (options.limit !== undefined) qb.limit(options.limit);
+    if (options.offset !== undefined) qb.offset(options.offset);
+    const rows = await qb.getMany();
+    return rows.map(toDomain);
+  }
+
+  async update(
+    id: UserId,
+    input: UpdateUserInput,
+    manager?: EntityManager,
+  ): Promise<UserDomain | null> {
+    const repo = this.scoped(manager);
+    const patch: Partial<UserEntity> = {};
+    if (input.displayName !== undefined) patch.displayName = input.displayName;
+    if (input.role !== undefined) patch.role = input.role;
+    if (Object.keys(patch).length > 0) await repo.update({ id }, patch);
+    const row = await repo.findOne({ where: { id } });
+    return row ? toDomain(row) : null;
+  }
+
+  async setDisabled(id: UserId, disabled: boolean, manager?: EntityManager): Promise<void> {
+    await this.scoped(manager).update({ id }, { disabled });
   }
 }

@@ -15,6 +15,9 @@ import { MessagesModule } from '@app/modules/messages/messages.module';
 import { ChatsModule } from '@app/modules/chats/chats.module';
 import { SessionsModule } from '@app/modules/sessions/sessions.module';
 import { WebhooksModule } from '@app/modules/webhooks/webhooks.module';
+import { AssignmentsModule } from '@app/modules/assignments/assignments.module';
+import { MuteModule } from '@app/modules/mute/mute.module';
+import { FeedbackModule } from '@app/modules/feedback/feedback.module';
 
 @Module({
   imports: [
@@ -30,7 +33,10 @@ import { WebhooksModule } from '@app/modules/webhooks/webhooks.module';
     WahaStoreModule,
     SessionsModule,
     MessagesModule,
+    AssignmentsModule,
+    MuteModule,
     ChatsModule,
+    FeedbackModule,
     WebhooksModule,
     QueueModule,
   ],

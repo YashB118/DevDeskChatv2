@@ -1,14 +1,14 @@
 ## Module — Chats
 
-> Chat list facade. The chat directory itself lives in WAHA — we never persist a `chats` table — but `chat_metadata` holds per-chat overrides (display name, last-seen). Reads fan-out through `WahaService.listChats`, dedupe by chat id, enrich with metadata, and cache for 10s per `(userId, session, limit, offset)` via `CacheService.wrap`. A `ChatPolicy` stub gates visibility (admins see everything; Phase 9 narrows the developer path against `developer_assignments`).
+> Chat list facade. The chat directory itself lives in WAHA — we never persist a `chats` table — but `chat_metadata` holds per-chat overrides (display name, last-seen). Reads fan-out through `WahaService.listChats`, dedupe by chat id, gate by `ChatPolicy` (admins see everything; developers are restricted to chats with an active row in `developer_assignments`), enrich with metadata + mute state, and cache for 10s per `(userId, session, limit, offset)` via `CacheService.wrap`.
 
 **Files**
-- `src/modules/chats/chats.module.ts` — providers + controller; imports `WahaModule` + `UsersModule`.
+- `src/modules/chats/chats.module.ts` — providers + controller; imports `WahaModule`, `UsersModule`, `AssignmentsModule`, `MuteModule`.
 - `src/modules/chats/chats.controller.ts` — `@UseGuards(JwtAuthGuard)`; routes under `/api/chats`. Resolves the current `UserDomain` via `UserRepository.findById` for policy decisions.
-- `src/modules/chats/chats.service.ts` — `list` / `markRead` / `sync`; owns the cache key shape.
+- `src/modules/chats/chats.service.ts` — `list` / `markRead` / `sync`; owns the cache key shape; calls `MuteService.filterMutedChatIds` during enrichment so `muted` reflects the live `chat_mutes` table.
 - `src/modules/chats/chat-metadata.entity.ts` — `chat_metadata` table (`chatId` PK, `displayNameOverride`, `lastSeenAt`, `updatedAt`).
 - `src/modules/chats/chat-metadata.repository.ts` — `findByChatId`, `setLastSeen`, `setDisplayNameOverride`.
-- `src/modules/chats/chat.policy.ts` — `filterVisibleChatIds(user, ids)`, `canReadChat`, `canWriteChat` (Phase 8 stub; Phase 9 narrows).
+- `src/modules/chats/chat.policy.ts` — `filterVisibleChatIds(user, ids)`, `canReadChat`, `canWriteChat`, `assertCanWrite`; queries `AssignmentRepository` for non-admin actors. Reads/writes throw `ForbiddenError` when the chat is not actively assigned.
 - `src/modules/chats/chat.schema.ts` — Zod for query + param.
 
 ---
@@ -21,7 +21,7 @@
 | `POST` | `/api/chats/:chatId/read` | — |
 | `POST` | `/api/chats/sync?session=<n>` | — |
 
-Response shape: `{ chats: EnrichedChat[] }`. `EnrichedChat = { id, name, isGroup, unreadCount, lastMessage, displayNameOverride, lastSeenAt, muted }` (muted is `false` until Phase 9 wires the mute table).
+Response shape: `{ chats: EnrichedChat[] }`. `EnrichedChat = { id, name, isGroup, unreadCount, lastMessage, displayNameOverride, lastSeenAt, muted }`. As of Phase 9, `muted` is the live value from `chat_mutes` for the calling user.
 
 ## 2. List flow
 
@@ -32,8 +32,9 @@ ChatsController.list
       ↓ cache.wrap(`chats:list:<userId>:<session>:<limit>:<offset>`, loader, { ttlSeconds: 10, schema })
           ↓ waha.listChats(session, { limit, offset })
           ↓ dedupe by chat id
-          ↓ policy.filterVisibleChatIds(user, ids)
-          ↓ enrich (chat_metadata join in memory)
+          ↓ policy.filterVisibleChatIds(user, ids)                  // joins developer_assignments for non-admins
+          ↓ mute.filterMutedChatIds(userId, visibleIds)             // resolves Set<chatId> in one query
+          ↓ enrich (chat_metadata join in memory; muted from set)
       ← EnrichedChat[]
 ```
 
@@ -41,16 +42,15 @@ Cached payloads pass through a Zod schema on read so a deploy that changed the s
 
 ## 3. Mark-read + sync
 
-- `markRead(user, chatId)` calls `chat.policy.canWriteChat`, `chat_metadata.setLastSeen(chatId, new Date())`, then invalidates the default-page cache key. Phase 9 will also publish a `chat:read` socket event.
+- `markRead(user, chatId)` calls `chat.policy.assertCanWrite` (throws `ForbiddenError` if a developer marks an unassigned chat read), `chat_metadata.setLastSeen(chatId, new Date())`, then invalidates the default-page cache key. A `chat:read` socket event still needs wiring (planned).
 - `sync(user, session)` invalidates the user's cached page + `WahaService.invalidateChats(session)`, then re-runs `list` with default paging. The frontend calls this when the user pulls to refresh.
 
-## 4. Open questions / Phase 9 follow-ups
+## 4. Open questions / future phases
 
-- `ChatPolicy` is currently permissive for developers. Phase 9 will join against `developer_assignments` so developers only see assigned chats.
-- Muted state is hardcoded `false`; Phase 9 wires `chat_mutes` + `global_mutes`.
-- `GET /api/chats/:chatId/participants` not yet exposed (WAHA call wrapper); land it alongside the assignment-aware visibility filter.
+- `GET /api/chats/:chatId/participants` not yet exposed (WAHA call wrapper); land alongside the per-chat-member badge UI.
 - `invalidateUserCache` currently only deletes the default-page key (`<limit>=50, <offset>=0`) because `CacheService` doesn't expose `SCAN`. If non-default paging starts mattering, layer a small key-set in Redis to track active keys per user, or move the cache key namespace under a Redis `Hash` so a single `DEL` clears the user's pages.
+- Mute toggles do **not** invalidate the chat-list cache today — the 10s TTL is short enough that the discrepancy resolves quickly, and the explicit `/api/chats/sync` path handles the "I want it now" case.
 
 ## 5. Tests (`src/modules/chats/chat.policy.spec.ts`)
 
-Admin sees every id; developer visibility is permissive (Phase 9 will narrow); `canReadChat` / `canWriteChat` permissive at this phase. Chat list integration coverage lives in the Phase-12 Testcontainers e2e.
+Admins see every id; developers only see chats where `AssignmentRepository.listActiveChatIdsForUser` returned the id; `canReadChat` / `canWriteChat` return true for admins unconditionally and for developers only when an active assignment exists. Chat-list integration coverage lives in the Phase-12 Testcontainers e2e.

@@ -107,6 +107,24 @@ export const GroupParticipantsSchema = z.object({
   participants: z.array(z.string().min(1)),
 });
 
+// ----- Collaboration (Phase 9) -----
+
+export const ChatAssignmentSchema = z.object({
+  assignmentId: z.string().uuid(),
+  userId: z.string().uuid(),
+  chatId: z.string().min(1),
+  assignedBy: z.string().uuid().nullable(),
+  assignedAt: z.string().datetime(),
+});
+
+export const ChatUnassignmentSchema = z.object({
+  assignmentId: z.string().uuid(),
+  userId: z.string().uuid(),
+  chatId: z.string().min(1),
+  unassignedBy: z.string().uuid().nullable(),
+  unassignedAt: z.string().datetime(),
+});
+
 export const OutboundEvents = {
   pong: PongSchema,
   'error:invalid_payload': InvalidPayloadSchema,
@@ -117,6 +135,8 @@ export const OutboundEvents = {
   'message:reaction': MessageReactionSchema,
   'session:status': SessionStatusSchema,
   'group:participants': GroupParticipantsSchema,
+  'chat:assigned': ChatAssignmentSchema,
+  'chat:unassigned': ChatUnassignmentSchema,
 } as const;
 
 export type OutboundEventName = keyof typeof OutboundEvents;

@@ -792,7 +792,7 @@ Today the app ships an `AppErrorBoundary` + per-route `RouteErrorBoundary` and a
 | E2E | Playwright | ⏳ | Phase 12 — golden-path flows |
 | Accessibility | `vitest-axe` + Storybook a11y | ✅ | Primitives + compounds covered; full per-route sweep in Phase 10 |
 
-Today: **137 tests pass across 34 files**. Coverage thresholds (line/branch — 75% for `features/*`, 90% for `realtime/*` and `lib/*`) are not yet gated in CI; the gate lands in Phase 12. Coverage is a floor; meaningful assertions are the actual bar.
+Today: **152 tests pass across 40 files**. Coverage thresholds (line/branch — 75% for `features/*`, 90% for `realtime/*` and `lib/*`) are not yet gated in CI; the gate lands in Phase 12. Coverage is a floor; meaningful assertions are the actual bar.
 
 ---
 
@@ -850,16 +850,23 @@ A quick tour of how the principles compose in each feature.
 - Optimistic send appends a `PendingMessage`; the reconciliation step swaps it for the server-confirmed version on `message:new` arrival.
 - Virtualized reverse list with date dividers injected during render, not stored.
 
-### 16.3 Sessions (Admin)
+### 16.3 Sessions (Admin) ✅ Phase 9
 
-- Hydrate sessions on admin entry.
-- `sessions.sync.ts` handles `session:status` events; QR panel listens and refreshes when status flips to `SCAN_QR_CODE`.
-- Code-split: the admin bundle is only loaded for admin users.
+- Hydrate sessions on admin entry via `useSessions()` (`keys.sessions()`).
+- `sessions.sync.ts` handles `session:status` events: pure mutation `applySessionStatus` updates the cache, then the bus emits `sessions:status` so the QR panel hook (`useSessionQR`) invalidates its query whenever the named session flips to `SCAN_QR_CODE`.
+- Code-split: the admin chunk (`assets/index-*.js`, ~25 KB raw / 6.5 KB gz) is only loaded for admin users.
 
-### 16.4 Assignments
+### 16.4 Assignments ✅ Phase 9
 
 - Cache is fully driven by `chat:assigned` / `chat:unassigned` events.
-- Re-assigning a chat triggers an optimistic update; on server confirmation the optimistic record is reconciled.
+- Re-assigning a chat triggers an optimistic update via `useAssignmentActions`; failure paths roll back to a per-key snapshot.
+- The assignee `<select>` is sourced from `lib/data/useDirectory` (same `keys.users()` cache as admin `useUsers`) to keep feature boundaries intact.
+
+### 16.7 Admin (Users / Feedback / Mute) ✅ Phase 9
+
+- User CRUD via `useUsers` + `useUserActions` against `/api/users`; `user:updated` socket events flip cached `disabled`/`role` without refetching.
+- Feedback inbox via cursor-paginated `useFeedback`; `feedback:new` socket events refetch the latest item (`limit=1`) to materialize the body while keeping the rest of the cache untouched.
+- Global mute is a single Boolean against `/api/mute/global`, optimistic with rollback. The notification service that consumes it lands in Phase 10.
 
 ### 16.5 Notifications
 

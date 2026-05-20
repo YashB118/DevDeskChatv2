@@ -12,6 +12,7 @@
 - `src/infra/db/migrations/0001_init.ts` — initial migration (enables `pgcrypto`).
 - `src/infra/db/migrations/0002_auth.ts` — Phase 3 schema: `citext` extension, `user_role` enum, `users`, `refresh_tokens`, range-partitioned `audit_log` + `ensure_audit_log_partition(date)` helper.
 - `src/infra/db/migrations/0003_messaging.ts` — Phase 8 schema: `session_status` + `message_type` enums, `sessions`, `chat_metadata`, range-partitioned `messages` (composite PK `(id, sent_at)`, BRIN on `sent_at`, `(chat_id, sent_at DESC)` index), `message_reactions` / `message_edits` / `deleted_messages` / `message_mentions` / `message_quotes` sub-tables (keyed by `stanza_id` — Postgres won't allow FKs to a partitioned table on a non-unique column), `ensure_messages_partition(date)` helper.
+- `src/infra/db/migrations/0004_collaboration.ts` — Phase 9 schema: `assignment_event` enum, `developer_assignments` with partial-unique `(user_id, chat_id) WHERE is_active = true` (the linchpin that prevents duplicate active assignments while preserving history), `assignment_history`, `chat_mutes` (composite PK), `global_mutes` (PK per user), `feedback` with `(user_id, created_at DESC)` + partial `(read, created_at DESC) WHERE read = false` indexes.
 - `src/infra/db/partitions.ts` — `ensureMessagesPartitionsForNextMonths(dataSource, n)` and `ensureAuditLogPartitionsForNextMonths(dataSource, n)` wrappers; called at boot and from the Phase-12 daily cron.
 - `scripts/migrate.ts`, `scripts/migrate-revert.ts`, `scripts/seed.ts` — CLI entry points.
 

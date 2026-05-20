@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_CONFIG } from '@app/config/constants';
@@ -10,9 +10,10 @@ import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 
+@Global()
 @Module({
   imports: [
-    UsersModule,
+    forwardRef(() => UsersModule),
     TypeOrmModule.forFeature([RefreshTokenEntity, AuditLogEntity]),
     JwtModule.registerAsync({
       inject: [APP_CONFIG],

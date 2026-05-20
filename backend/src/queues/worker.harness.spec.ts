@@ -83,11 +83,11 @@ describe('WorkerHarness', () => {
       .mockImplementation((msg: string) => {
         logged.push(msg);
       });
-    await harness.run(fakeJob({ id: 'j7', queueName: 'webhook:waha' }), Schema, async () => 'k');
+    await harness.run(fakeJob({ id: 'j7', queueName: 'webhook-waha' }), Schema, async () => 'k');
     spy.mockRestore();
     const success = logged.find((m) => m.startsWith('queue.job.success'));
     expect(success).toBeDefined();
-    expect(success).toContain('queue=webhook:waha');
+    expect(success).toContain('queue=webhook-waha');
     expect(success).toContain('jobId=j7');
     expect(success).toContain('durationMs=');
   });

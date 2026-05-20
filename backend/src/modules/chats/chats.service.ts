@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
 import { WahaService } from '@app/integrations/waha/waha.service';
 import { CacheService } from '@app/infra/cache/cache.service';
+import { MuteService } from '@app/modules/mute/mute.service';
 import { type UserDomain } from '@app/modules/users/user.types';
 import { ChatMetadataRepository } from './chat-metadata.repository';
 import { ChatPolicy } from './chat.policy';
@@ -55,6 +56,7 @@ export class ChatsService {
     private readonly metadata: ChatMetadataRepository,
     private readonly cache: CacheService,
     private readonly policy: ChatPolicy,
+    private readonly mute: MuteService,
   ) {}
 
   async list(user: UserDomain, query: ListChatsQuery): Promise<EnrichedChat[]> {
@@ -67,21 +69,24 @@ export class ChatsService {
           offset: query.offset,
         });
         const deduped = dedupe(upstream);
-        const visibleIds = this.policy.filterVisibleChatIds(
+        const visibleIds = await this.policy.filterVisibleChatIds(
           user,
           deduped.map((c) => c.id),
         );
-        const visible = deduped.filter((c) => visibleIds.includes(c.id));
-        return this.enrich(visible);
+        const visibleSet = new Set(visibleIds);
+        const visible = deduped.filter((c) => visibleSet.has(c.id));
+        const muted = await this.mute.filterMutedChatIds(
+          user.id,
+          visible.map((c) => c.id),
+        );
+        return this.enrich(visible, muted);
       },
       { ttlSeconds: ChatsService.CACHE_TTL_SECONDS, schema: CachedChatListSchema },
     );
   }
 
   async markRead(user: UserDomain, chatId: string): Promise<void> {
-    if (!this.policy.canWriteChat(user, chatId)) {
-      throw new Error('forbidden');
-    }
+    await this.policy.assertCanWrite(user, chatId);
     await this.metadata.setLastSeen(chatId, new Date());
     // Invalidate cache so the unread count refreshes on next list call.
     await this.invalidateUserCache(user.id);
@@ -109,6 +114,7 @@ export class ChatsService {
         | null
         | undefined;
     }[],
+    mutedIds: Set<string>,
   ): Promise<EnrichedChat[]> {
     const metadata = await Promise.all(chats.map((c) => this.metadata.findByChatId(c.id)));
     return chats.map((c, i) => {
@@ -129,7 +135,7 @@ export class ChatsService {
         lastMessage,
         displayNameOverride: meta?.displayNameOverride ?? null,
         lastSeenAt: meta?.lastSeenAt?.toISOString() ?? null,
-        muted: false, // Phase-9 mute table wires the real value here.
+        muted: mutedIds.has(c.id),
       };
     });
   }
