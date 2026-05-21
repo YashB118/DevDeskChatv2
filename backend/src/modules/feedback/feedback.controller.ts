@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -22,6 +23,8 @@ import { FeedbackService } from './feedback.service';
 import {
   ListFeedbackQuerySchema,
   type ListFeedbackQuery,
+  MarkFeedbackSchema,
+  type MarkFeedbackInput,
   SubmitFeedbackSchema,
   type SubmitFeedbackInput,
 } from './feedback.schema';
@@ -53,6 +56,21 @@ export class FeedbackController {
     return { feedback: await this.service.list(user, query) };
   }
 
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  async update(
+    @CurrentUser() current: AuthenticatedRequestUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(MarkFeedbackSchema)) body: MarkFeedbackInput,
+  ): Promise<{ feedback: FeedbackDomain }> {
+    const user = await this.resolve(current);
+    return { feedback: await this.service.setRead(user, id, body.read) };
+  }
+
+  /**
+   * @deprecated kept for one release while the frontend cuts over to PATCH /api/feedback/:id.
+   * Remove in a follow-up cleanup phase.
+   */
   @Post(':id/read')
   @HttpCode(HttpStatus.OK)
   async markRead(
@@ -60,7 +78,7 @@ export class FeedbackController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<{ feedback: FeedbackDomain }> {
     const user = await this.resolve(current);
-    return { feedback: await this.service.markRead(user, id) };
+    return { feedback: await this.service.setRead(user, id, true) };
   }
 
   private async resolve(current: AuthenticatedRequestUser): Promise<UserDomain> {

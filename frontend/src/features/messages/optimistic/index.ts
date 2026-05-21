@@ -6,15 +6,39 @@ import type {
   MessageNewPayload,
   MessageReactionPayload,
 } from '@/realtime/events.contract';
-import type { MessageDTO, MessagePage, SendMessageInput } from '../types';
+import type {
+  MessageDTO,
+  MessagePage,
+  MessageType,
+  SendMessageInput,
+  SendMessageResponse,
+} from '../types';
 
 export type MessagesCache = InfiniteData<MessagePage> | undefined;
 
+const KNOWN_TYPES = new Set<MessageType>([
+  'TEXT',
+  'IMAGE',
+  'VIDEO',
+  'AUDIO',
+  'DOCUMENT',
+  'STICKER',
+  'SYSTEM',
+]);
+function coerceType(t: string): MessageType {
+  const upper = t.toUpperCase();
+  return KNOWN_TYPES.has(upper as MessageType) ? (upper as MessageType) : 'TEXT';
+}
+function isoToMs(iso: string): number {
+  const ts = Date.parse(iso);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 /**
  * Cache shape: the most-recent page lives at pages[0], older pages append.
- * Within a page, items are ordered oldest → newest.
+ * Within a page, items are ordered oldest → newest. Events from the wire are
+ * keyed by `stanzaId`; locally generated bubbles match by `id` / `tempId`.
  */
-
 function mapMessages(
   data: MessagesCache,
   fn: (m: MessageDTO) => MessageDTO,
@@ -29,7 +53,7 @@ function mapMessages(
   };
 }
 
-function findMessage(data: MessagesCache, messageId: string): MessageDTO | null {
+function findById(data: MessagesCache, messageId: string): MessageDTO | null {
   if (!data) return null;
   for (const page of data.pages) {
     for (const m of page.items) {
@@ -51,6 +75,7 @@ export function buildPending(
 ): MessageDTO {
   return {
     id: tempId,
+    stanzaId: tempId,
     tempId,
     chatId,
     senderId,
@@ -93,24 +118,20 @@ export function appendOptimistic(data: MessagesCache, optimistic: MessageDTO): M
 export function reconcileSend(
   data: MessagesCache,
   tempId: string,
-  server: MessageDTO,
+  server: SendMessageResponse,
 ): MessagesCache {
   if (!data) return data;
-  const replaced = { value: false };
-  const next = {
+  return {
     ...data,
     pages: data.pages.map((page) => ({
       ...page,
-      items: page.items.map((m) => {
-        if ((m.tempId !== undefined && m.tempId === tempId) || m.id === tempId) {
-          replaced.value = true;
-          return { ...server, status: 'confirmed' as const, tempId: undefined };
-        }
-        return m;
-      }),
+      items: page.items.map((m) =>
+        (m.tempId !== undefined && m.tempId === tempId) || m.id === tempId
+          ? { ...m, id: server.id, stanzaId: server.stanzaId, status: 'confirmed' as const, tempId: undefined }
+          : m,
+      ),
     })),
   };
-  return replaced.value ? next : appendOptimistic(data, { ...server, status: 'confirmed' });
 }
 
 export function markFailed(data: MessagesCache, tempId: string): MessagesCache {
@@ -120,17 +141,18 @@ export function markFailed(data: MessagesCache, tempId: string): MessagesCache {
 }
 
 export function applyMessageNew(data: MessagesCache, payload: MessageNewPayload): MessagesCache {
-  const partial = payload.message;
-  const existing = findMessage(data, partial.id);
+  const m = payload.message;
+  const existing = findById(data, m.id);
   if (existing) return data;
 
   const enriched: MessageDTO = {
-    id: partial.id,
-    chatId: partial.chatId,
-    senderId: partial.senderId,
-    body: partial.body,
-    type: partial.type,
-    ts: partial.ts,
+    id: m.id,
+    stanzaId: m.stanzaId,
+    chatId: m.chatId,
+    senderId: m.fromJid,
+    body: m.body ?? '',
+    type: coerceType(m.type),
+    ts: isoToMs(m.sentAt),
     editedAt: null,
     deletedAt: null,
     reactions: [],
@@ -142,9 +164,11 @@ export function applyMessageNew(data: MessagesCache, payload: MessageNewPayload)
   return appendOptimistic(data, enriched);
 }
 
+/** Match events by `stanzaId` (the wire id). Local optimistic rows carry the
+ *  tempId as stanzaId until {@link reconcileSend} swaps it for the real one. */
 export function applyAck(data: MessagesCache, payload: MessageAckPayload): MessagesCache {
   return mapMessages(data, (m) =>
-    m.id === payload.messageId ? { ...m, ackState: payload.state } : m,
+    m.stanzaId === payload.stanzaId ? { ...m, ackState: payload.ack } : m,
   );
 }
 
@@ -152,6 +176,16 @@ export function applyEdit(
   data: MessagesCache,
   payload: MessageEditedPayload | { messageId: string; body: string; editedAt?: number },
 ): MessagesCache {
+  // Two shapes: the realtime payload (stanzaId + newBody + ISO editedAt) and
+  // the local optimistic shape (messageId + body + numeric editedAt) used by
+  // the edit mutation. Branch on which fields are present.
+  if ('stanzaId' in payload) {
+    return mapMessages(data, (m) =>
+      m.stanzaId === payload.stanzaId
+        ? { ...m, body: payload.newBody ?? '', editedAt: isoToMs(payload.editedAt) }
+        : m,
+    );
+  }
   return mapMessages(data, (m) =>
     m.id === payload.messageId
       ? { ...m, body: payload.body, editedAt: payload.editedAt ?? Date.now() }
@@ -163,6 +197,13 @@ export function applyDelete(
   data: MessagesCache,
   payload: MessageDeletedPayload | { messageId: string; deletedAt?: number },
 ): MessagesCache {
+  if ('stanzaId' in payload) {
+    return mapMessages(data, (m) =>
+      m.stanzaId === payload.stanzaId
+        ? { ...m, deletedAt: isoToMs(payload.deletedAt), body: '' }
+        : m,
+    );
+  }
   return mapMessages(data, (m) =>
     m.id === payload.messageId
       ? { ...m, deletedAt: payload.deletedAt ?? Date.now(), body: '' }
@@ -170,7 +211,27 @@ export function applyDelete(
   );
 }
 
-export function applyReaction(data: MessagesCache, payload: MessageReactionPayload): MessagesCache {
+/**
+ * Local optimistic shape uses {messageId, userId, emoji}. The realtime payload
+ * uses {stanzaId, senderJid, emoji, removed}. Both branches converge on:
+ * filter out (user, *) entries, optionally re-add (user, emoji).
+ */
+export function applyReaction(
+  data: MessagesCache,
+  payload:
+    | MessageReactionPayload
+    | { chatId: string; messageId: string; userId: string; emoji: string | null },
+): MessagesCache {
+  if ('stanzaId' in payload) {
+    return mapMessages(data, (m) => {
+      if (m.stanzaId !== payload.stanzaId) return m;
+      const filtered = m.reactions.filter((r) => r.userId !== payload.senderJid);
+      const next = payload.removed
+        ? filtered
+        : [...filtered, { userId: payload.senderJid, emoji: payload.emoji }];
+      return { ...m, reactions: next };
+    });
+  }
   return mapMessages(data, (m) => {
     if (m.id !== payload.messageId) return m;
     const filtered = m.reactions.filter((r) => r.userId !== payload.userId);

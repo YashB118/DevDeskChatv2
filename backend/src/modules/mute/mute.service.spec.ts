@@ -6,6 +6,7 @@ import { type AuthRepository } from '@app/modules/auth/auth.repository';
 import { ForbiddenError } from '@app/modules/auth/auth.errors';
 import { UserRole, type UserDomain } from '@app/modules/users/user.types';
 import { UserId } from '@app/shared/types/ids';
+import { type SocketEmitter } from '@app/realtime/socket.emitter';
 
 function adminUser(): UserDomain {
   return {
@@ -35,6 +36,7 @@ interface Stubs {
   repo: MuteRepository;
   assignments: AssignmentRepository;
   auth: AuthRepository;
+  emitter: SocketEmitter;
 }
 
 function buildStubs(): Stubs {
@@ -49,6 +51,13 @@ function buildStubs(): Stubs {
     } as unknown as MuteRepository,
     assignments: { findActive: vi.fn() } as unknown as AssignmentRepository,
     auth: { writeAudit: vi.fn() } as unknown as AuthRepository,
+    emitter: {
+      toUser: vi.fn(),
+      toChat: vi.fn(),
+      toAdmins: vi.fn(),
+      toSocket: vi.fn(),
+      disconnectUser: vi.fn(),
+    } as unknown as SocketEmitter,
   };
 }
 
@@ -58,13 +67,17 @@ describe('MuteService', () => {
 
   beforeEach(() => {
     stubs = buildStubs();
-    svc = new MuteService(stubs.repo, stubs.assignments, stubs.auth);
+    svc = new MuteService(stubs.repo, stubs.assignments, stubs.auth, stubs.emitter);
   });
 
-  it('admin can mute any chat', async () => {
+  it('admin can mute any chat and broadcasts chat:muted to that user', async () => {
     await svc.setChatMute(adminUser(), 'any-chat', true);
     expect(stubs.repo.setChatMute).toHaveBeenCalledWith(adminUser().id, 'any-chat', true);
     expect(stubs.auth.writeAudit).toHaveBeenCalledWith('mute.chat.set', adminUser().id, {
+      chatId: 'any-chat',
+      muted: true,
+    });
+    expect(stubs.emitter.toUser).toHaveBeenCalledWith(adminUser().id, 'chat:muted', {
       chatId: 'any-chat',
       muted: true,
     });

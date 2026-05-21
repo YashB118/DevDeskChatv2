@@ -16,6 +16,8 @@ export const keys = {
   messages: (chatId: ChatId) => ['messages', chatId] as const,
   message: (chatId: ChatId, messageId: MessageId) =>
     ['messages', chatId, messageId] as const,
+  chatParticipants: (chatId: ChatId | string) =>
+    ['chats', 'participants', chatId] as const,
 
   assignments: () => ['assignments'] as const,
   assignmentsByUser: (userId: UserId) => ['assignments', 'user', userId] as const,
@@ -35,6 +37,7 @@ export type QueryKey =
   | ReturnType<typeof keys.chat>
   | ReturnType<typeof keys.messages>
   | ReturnType<typeof keys.message>
+  | ReturnType<typeof keys.chatParticipants>
   | ReturnType<typeof keys.assignments>
   | ReturnType<typeof keys.assignmentsByUser>
   | ReturnType<typeof keys.sessions>

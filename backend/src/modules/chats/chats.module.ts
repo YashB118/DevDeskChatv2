@@ -4,6 +4,7 @@ import { WahaModule } from '@app/integrations/waha/waha.module';
 import { UsersModule } from '@app/modules/users/users.module';
 import { AssignmentsModule } from '@app/modules/assignments/assignments.module';
 import { MuteModule } from '@app/modules/mute/mute.module';
+import { RealtimeModule } from '@app/realtime/realtime.module';
 import { ChatMetadataEntity } from './chat-metadata.entity';
 import { ChatMetadataRepository } from './chat-metadata.repository';
 import { ChatPolicy } from './chat.policy';
@@ -17,6 +18,7 @@ import { ChatsService } from './chats.service';
     UsersModule,
     AssignmentsModule,
     MuteModule,
+    RealtimeModule,
   ],
   controllers: [ChatsController],
   providers: [ChatMetadataRepository, ChatPolicy, ChatsService],

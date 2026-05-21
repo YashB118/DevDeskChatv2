@@ -37,7 +37,7 @@ export function NotificationController({ children }: { children?: ReactNode }): 
         soundEnabled: () => useSettingsStore.getState().settings.notifications.soundEnabled,
         faviconBadgeEnabled: () =>
           useSettingsStore.getState().settings.notifications.faviconBadgeEnabled,
-        globalMuted: () => globalMute?.muted ?? false,
+        globalMuted: () => globalMute?.enabled ?? false,
         chatMuted: (chatId) => findChat(qc, chatId)?.muted ?? false,
         activeChatId: () => useChatsUIStore.getState().activeChatId,
         documentHasFocus: () => (typeof document === 'undefined' ? false : document.hasFocus()),
@@ -47,7 +47,7 @@ export function NotificationController({ children }: { children?: ReactNode }): 
         showDesktop: (payload) => {
           const chat = findChat(qc, payload.chatId);
           const title = chat?.title ?? 'New message';
-          showDesktopNotification(title, payload.preview.preview);
+          showDesktopNotification(title, payload.message.body ?? '');
         },
         playSound: () => {
           playNotificationSound();
@@ -58,7 +58,7 @@ export function NotificationController({ children }: { children?: ReactNode }): 
       },
     );
     return teardown;
-  }, [qc, globalMute?.muted]);
+  }, [qc, globalMute?.enabled]);
 
   // Keep favicon badge in sync with any chat-cache changes (read/mute/etc).
   useEffect(() => {

@@ -1,7 +1,7 @@
 import type { InfiniteData } from '@tanstack/react-query';
 import type {
-  ChatAssignedPayload,
-  ChatUnassignedPayload,
+  ChatAssignmentPayload,
+  ChatUnassignmentPayload,
 } from '@/realtime/events.contract';
 import type { AssignmentDTO, AssignmentList } from '../types';
 
@@ -15,16 +15,32 @@ function mapItems(data: Pages, fn: (a: AssignmentDTO) => AssignmentDTO): Pages {
   };
 }
 
-export function applyAssigned(data: Pages, p: ChatAssignedPayload): Pages {
+export function applyAssigned(data: Pages, p: ChatAssignmentPayload): Pages {
   return mapItems(data, (a) =>
     a.chatId === p.chatId
-      ? { ...a, assignedTo: p.assignedTo, assignedToName: a.assignedToName, updatedAt: Date.now() }
+      ? {
+          ...a,
+          id: p.assignmentId,
+          userId: p.userId,
+          assignedBy: p.assignedBy,
+          assignedAt: p.assignedAt,
+          isActive: true,
+          unassignedAt: null,
+        }
       : a,
   );
 }
 
-export function applyUnassigned(data: Pages, p: ChatUnassignedPayload): Pages {
+export function applyUnassigned(data: Pages, p: ChatUnassignmentPayload): Pages {
   return mapItems(data, (a) =>
-    a.chatId === p.chatId ? { ...a, assignedTo: null, assignedToName: null, updatedAt: Date.now() } : a,
+    a.chatId === p.chatId
+      ? {
+          ...a,
+          id: p.assignmentId,
+          isActive: false,
+          unassignedAt: p.unassignedAt,
+          assignedToName: null,
+        }
+      : a,
   );
 }

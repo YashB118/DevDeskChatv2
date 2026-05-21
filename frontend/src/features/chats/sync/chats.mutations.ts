@@ -1,14 +1,19 @@
 import type { InfiniteData } from '@tanstack/react-query';
 import type {
-  ChatAssignedPayload,
+  ChatAssignmentPayload,
   ChatMutedPayload,
   ChatReadPayload,
-  ChatUnassignedPayload,
+  ChatUnassignmentPayload,
   MessageNewPayload,
 } from '@/realtime/events.contract';
-import type { ChatDTO, ChatListPage } from '../types';
+import type { ChatDTO, ChatListPage, ChatPreview } from '../types';
 
 type Pages = InfiniteData<ChatListPage> | undefined;
+
+function isoToMs(iso: string): number {
+  const ts = Date.parse(iso);
+  return Number.isFinite(ts) ? ts : 0;
+}
 
 function mapPages(
   data: Pages,
@@ -24,17 +29,29 @@ function mapPages(
   };
 }
 
+/**
+ * Backend `message:new` payload is `{chatId, message: MessageDto}`. Derive the
+ * preview locally so the chat row can render without a separate fetch. Use
+ * `message.fromMe` to decide whether to bump unread.
+ */
 export function bumpChatWithMessage(data: Pages, payload: MessageNewPayload): Pages {
   if (!data) return data;
-  const { chatId, message, preview } = payload;
+  const { chatId, message } = payload;
   const current = data.pages.flatMap((p) => p.items).find((c) => c.id === chatId);
   if (!current) return data;
 
+  const ts = isoToMs(message.sentAt);
+  const preview: ChatPreview = {
+    messageId: message.id,
+    preview: message.body ?? '',
+    ts,
+    fromSelf: message.fromMe,
+  };
   const updated: ChatDTO = {
     ...current,
-    unreadCount: preview.fromSelf ? current.unreadCount : current.unreadCount + 1,
+    unreadCount: message.fromMe ? current.unreadCount : current.unreadCount + 1,
     lastMessage: preview,
-    updatedAt: message.ts,
+    updatedAt: ts,
   };
 
   const stripped = data.pages.map((page) => ({
@@ -52,11 +69,11 @@ export function bumpChatWithMessage(data: Pages, payload: MessageNewPayload): Pa
   };
 }
 
-export function applyAssigned(data: Pages, p: ChatAssignedPayload): Pages {
-  return mapPages(data, (c) => (c.id === p.chatId ? { ...c, assignedTo: p.assignedTo } : c));
+export function applyAssigned(data: Pages, p: ChatAssignmentPayload): Pages {
+  return mapPages(data, (c) => (c.id === p.chatId ? { ...c, assignedTo: p.userId } : c));
 }
 
-export function applyUnassigned(data: Pages, p: ChatUnassignedPayload): Pages {
+export function applyUnassigned(data: Pages, p: ChatUnassignmentPayload): Pages {
   return mapPages(data, (c) => (c.id === p.chatId ? { ...c, assignedTo: null } : c));
 }
 

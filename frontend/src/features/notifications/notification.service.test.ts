@@ -3,12 +3,28 @@ import { eventBus } from '@/realtime/eventBus';
 import { shouldNotify, createNotificationService, type NotificationGates } from './notification.service';
 import type { MessageNewPayload } from '@/realtime/events.contract';
 
-function payload(over: Partial<MessageNewPayload> = {}): MessageNewPayload {
+function makeMessage(
+  over: Partial<MessageNewPayload['message']> = {},
+): MessageNewPayload['message'] {
   return {
+    id: 'm-1',
     chatId: 'c-1',
-    message: { id: 'm-1', chatId: 'c-1', senderId: 'u-other', body: 'hi', ts: 1, type: 'TEXT' },
-    preview: { messageId: 'm-1', preview: 'hi', ts: 1, fromSelf: false },
+    stanzaId: 'stz-1',
+    fromJid: 'u-other',
+    fromMe: false,
+    body: 'hi',
+    type: 'TEXT',
+    sentAt: '2026-01-01T00:00:00.000Z',
     ...over,
+  };
+}
+
+function payload(
+  over: { chatId?: string; message?: Partial<MessageNewPayload['message']> } = {},
+): MessageNewPayload {
+  return {
+    chatId: over.chatId ?? 'c-1',
+    message: makeMessage(over.message),
   };
 }
 
@@ -35,8 +51,8 @@ describe('shouldNotify', () => {
     });
   });
 
-  it('fromSelf suppresses everything', () => {
-    const p = payload({ preview: { messageId: 'm', preview: 'x', ts: 1, fromSelf: true } });
+  it('fromMe suppresses everything', () => {
+    const p = payload({ message: { fromMe: true } });
     expect(shouldNotify(p, baseGates())).toEqual({ desktop: false, sound: false, badge: false });
   });
 

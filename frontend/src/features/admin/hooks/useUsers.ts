@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { keys } from '@/shared/state/queryKeys';
 import type { UserId } from '@/shared/types/ids';
 import { adminApi } from '../api/admin.api';
-import type { AdminUserList, CreateUserInput, UpdateUserInput } from '../types';
+import type { AdminUserList, CreateUserInput, ResetPasswordInput, UpdateUserInput } from '../types';
 
 export function useUsers(): UseQueryResult<AdminUserList> {
   return useQuery({
@@ -15,6 +15,8 @@ export function useUsers(): UseQueryResult<AdminUserList> {
 export interface UseUserActionsReturn {
   create: (input: CreateUserInput) => Promise<void>;
   update: (userId: UserId, input: UpdateUserInput) => Promise<void>;
+  setDisabled: (userId: UserId, disabled: boolean) => Promise<void>;
+  resetPassword: (userId: UserId, input: ResetPasswordInput) => Promise<void>;
   remove: (userId: UserId) => Promise<void>;
 }
 
@@ -31,6 +33,15 @@ export function useUserActions(): UseUserActionsReturn {
     mutationFn: ({ userId, input }: { userId: UserId; input: UpdateUserInput }) =>
       adminApi.updateUser(userId, input),
     onSuccess: refetch,
+  });
+  const setDisabledMut = useMutation({
+    mutationFn: ({ userId, disabled }: { userId: UserId; disabled: boolean }) =>
+      adminApi.setDisabled(userId, disabled),
+    onSuccess: refetch,
+  });
+  const resetPasswordMut = useMutation({
+    mutationFn: ({ userId, input }: { userId: UserId; input: ResetPasswordInput }) =>
+      adminApi.resetPassword(userId, input),
   });
   const removeMut = useMutation({
     mutationFn: (userId: UserId) => adminApi.deleteUser(userId),
@@ -49,6 +60,18 @@ export function useUserActions(): UseUserActionsReturn {
     },
     [updateMut],
   );
+  const setDisabled = useCallback(
+    async (userId: UserId, disabled: boolean) => {
+      await setDisabledMut.mutateAsync({ userId, disabled });
+    },
+    [setDisabledMut],
+  );
+  const resetPassword = useCallback(
+    async (userId: UserId, input: ResetPasswordInput) => {
+      await resetPasswordMut.mutateAsync({ userId, input });
+    },
+    [resetPasswordMut],
+  );
   const remove = useCallback(
     async (userId: UserId) => {
       await removeMut.mutateAsync(userId);
@@ -56,5 +79,5 @@ export function useUserActions(): UseUserActionsReturn {
     [removeMut],
   );
 
-  return { create, update, remove };
+  return { create, update, setDisabled, resetPassword, remove };
 }

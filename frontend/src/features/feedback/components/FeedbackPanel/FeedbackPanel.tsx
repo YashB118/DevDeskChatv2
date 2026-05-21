@@ -4,10 +4,13 @@ import { Badge } from '@/design-system/primitives/Badge';
 import { Spinner } from '@/design-system/primitives/Spinner';
 import { EmptyState } from '@/design-system/compounds/EmptyState';
 import { SectionHeader } from '@/design-system/compounds/SectionHeader';
+import { useDirectory } from '@/lib/data/useDirectory';
 import { useFeedback } from '../../hooks/useFeedback';
 
-function formatTs(ts: number): string {
-  return new Date(ts).toLocaleString();
+function formatTs(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (Number.isNaN(parsed)) return iso;
+  return new Date(parsed).toLocaleString();
 }
 
 export function FeedbackPanel(): ReactElement {
@@ -20,9 +23,13 @@ export function FeedbackPanel(): ReactElement {
     isFetchingNextPage,
     markRead,
   } = useFeedback();
+  const { data: directory } = useDirectory();
 
   if (isLoading) return <div className="flex justify-center p-12"><Spinner aria-label="Loading feedback" /></div>;
   if (isError) return <EmptyState title="Failed to load feedback" />;
+
+  const nameFor = (userId: string | null): string =>
+    (userId && directory?.users.find((u) => u.id === userId)?.displayName) ?? 'Unknown';
 
   return (
     <div className="flex flex-col gap-4">
@@ -38,14 +45,14 @@ export function FeedbackPanel(): ReactElement {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{f.authorName}</span>
+                  <span className="font-medium">{f.authorName ?? nameFor(f.userId)}</span>
                   {!f.read && <Badge tone="accent">New</Badge>}
                 </div>
                 <time className="text-[length:var(--text-xs)] text-[var(--color-fg-muted)]">
-                  {formatTs(f.ts)}
+                  {formatTs(f.createdAt)}
                 </time>
               </div>
-              <p className="whitespace-pre-wrap text-[length:var(--text-sm)]">{f.message}</p>
+              <p className="whitespace-pre-wrap text-[length:var(--text-sm)]">{f.body}</p>
               {!f.read && (
                 <div className="flex justify-end">
                   <Button

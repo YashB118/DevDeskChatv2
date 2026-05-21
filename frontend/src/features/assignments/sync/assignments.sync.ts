@@ -1,10 +1,10 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query';
 import type { AppSocket } from '@/realtime/socket';
 import {
-  ChatAssignedSchema,
-  ChatUnassignedSchema,
-  type ChatAssignedPayload,
-  type ChatUnassignedPayload,
+  ChatAssignmentSchema,
+  ChatUnassignmentSchema,
+  type ChatAssignmentPayload,
+  type ChatUnassignmentPayload,
 } from '@/realtime/events.contract';
 import { keys } from '@/shared/state/queryKeys';
 import type { AssignmentList } from '../types';
@@ -22,15 +22,15 @@ function updateAll(qc: QueryClient, fn: (data: Cache | undefined) => Cache | und
 
 export function registerAssignmentsSync(socket: AppSocket, qc: QueryClient): () => void {
   const onAssigned = (raw: unknown): void => {
-    const parsed = ChatAssignedSchema.safeParse(raw);
+    const parsed = ChatAssignmentSchema.safeParse(raw);
     if (!parsed.success) return;
-    const payload: ChatAssignedPayload = parsed.data;
+    const payload: ChatAssignmentPayload = parsed.data;
     updateAll(qc, (data) => applyAssigned(data, payload));
   };
   const onUnassigned = (raw: unknown): void => {
-    const parsed = ChatUnassignedSchema.safeParse(raw);
+    const parsed = ChatUnassignmentSchema.safeParse(raw);
     if (!parsed.success) return;
-    const payload: ChatUnassignedPayload = parsed.data;
+    const payload: ChatUnassignmentPayload = parsed.data;
     updateAll(qc, (data) => applyUnassigned(data, payload));
   };
 

@@ -2,6 +2,13 @@ import type { ReactElement } from 'react';
 import { MessageComposer, MessageList, MessageSearch } from '@/features/messages';
 import { useChatIdParam } from '../hooks/useChatIdParam';
 
+/**
+ * Default WAHA session name until a session selector lands. Backend message
+ * write paths require `{session}` in the body; the standard WAHA instance is
+ * named `default`.
+ */
+const DEFAULT_SESSION = 'default';
+
 export function ChatPage(): ReactElement {
   const chatId = useChatIdParam();
   return (
@@ -13,9 +20,9 @@ export function ChatPage(): ReactElement {
         </div>
       </header>
       <div className="min-h-0 flex-1">
-        <MessageList chatId={chatId} />
+        <MessageList chatId={chatId} session={DEFAULT_SESSION} />
       </div>
-      <MessageComposer chatId={chatId} />
+      <MessageComposer chatId={chatId} session={DEFAULT_SESSION} />
     </div>
   );
 }

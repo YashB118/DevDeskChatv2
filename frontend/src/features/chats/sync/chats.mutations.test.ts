@@ -33,21 +33,34 @@ function cache(items: ChatDTO[]): InfiniteData<ChatListPage> {
   };
 }
 
+function msg(
+  over: { fromMe?: boolean; body?: string | null; sentAt?: string; id?: string } = {},
+): {
+  id: string;
+  chatId: string;
+  stanzaId: string;
+  fromJid: string;
+  fromMe: boolean;
+  body: string | null;
+  type: string;
+  sentAt: string;
+} {
+  return {
+    id: over.id ?? 'm-1',
+    chatId: 'c-1',
+    stanzaId: over.id ?? 'stz-1',
+    fromJid: 'u-other',
+    fromMe: over.fromMe ?? false,
+    body: over.body ?? 'hey',
+    type: 'TEXT',
+    sentAt: over.sentAt ?? '2026-01-01T00:00:01.000Z',
+  };
+}
+
 describe('chats sync mutations', () => {
   it('bumpChatWithMessage moves the chat to the top and increments unread', () => {
     const data = cache([chat({ id: 'c-2', title: 'Bob' }), chat({ id: 'c-1' })]);
-    const next = bumpChatWithMessage(data, {
-      chatId: 'c-1',
-      message: {
-        id: 'm-1',
-        chatId: 'c-1',
-        senderId: 'u-other',
-        body: 'hey',
-        ts: 1000,
-        type: 'TEXT',
-      },
-      preview: { messageId: 'm-1', preview: 'hey', ts: 1000, fromSelf: false },
-    });
+    const next = bumpChatWithMessage(data, { chatId: 'c-1', message: msg() });
     const items = next!.pages[0]!.items;
     expect(items[0]!.id).toBe('c-1');
     expect(items[0]!.unreadCount).toBe(1);
@@ -58,15 +71,7 @@ describe('chats sync mutations', () => {
     const data = cache([chat({ id: 'c-1', unreadCount: 3 })]);
     const next = bumpChatWithMessage(data, {
       chatId: 'c-1',
-      message: {
-        id: 'm-2',
-        chatId: 'c-1',
-        senderId: 'u-self',
-        body: 'mine',
-        ts: 2000,
-        type: 'TEXT',
-      },
-      preview: { messageId: 'm-2', preview: 'mine', ts: 2000, fromSelf: true },
+      message: msg({ id: 'm-2', body: 'mine', fromMe: true, sentAt: '2026-01-01T00:00:02.000Z' }),
     });
     expect(next!.pages[0]!.items[0]!.unreadCount).toBe(3);
   });
@@ -75,15 +80,7 @@ describe('chats sync mutations', () => {
     const data = cache([chat({ id: 'c-2' })]);
     const next = bumpChatWithMessage(data, {
       chatId: 'unknown',
-      message: {
-        id: 'm',
-        chatId: 'unknown',
-        senderId: 'x',
-        body: 'x',
-        ts: 1,
-        type: 'TEXT',
-      },
-      preview: { messageId: 'm', preview: 'x', ts: 1, fromSelf: false },
+      message: msg({ id: 'm', body: 'x' }),
     });
     expect(next).toBe(data);
   });
@@ -102,11 +99,23 @@ describe('chats sync mutations', () => {
     expect(next!.pages[0]!.items[1]!.muted).toBe(false);
   });
 
-  it('applyAssigned + applyUnassigned manipulate assignedTo', () => {
+  it('applyAssigned + applyUnassigned manipulate assignedTo on the chat row', () => {
     const data = cache([chat({ id: 'c-1' })]);
-    const assigned = applyAssigned(data, { chatId: 'c-1', assignedTo: 'u-9' });
-    expect(assigned!.pages[0]!.items[0]!.assignedTo).toBe('u-9');
-    const unassigned = applyUnassigned(assigned, { chatId: 'c-1' });
+    const assigned = applyAssigned(data, {
+      assignmentId: '00000000-0000-0000-0000-0000000000aa',
+      userId: '00000000-0000-0000-0000-0000000000bb',
+      chatId: 'c-1',
+      assignedBy: null,
+      assignedAt: '2026-02-01T00:00:00.000Z',
+    });
+    expect(assigned!.pages[0]!.items[0]!.assignedTo).toBe('00000000-0000-0000-0000-0000000000bb');
+    const unassigned = applyUnassigned(assigned, {
+      assignmentId: '00000000-0000-0000-0000-0000000000aa',
+      userId: '00000000-0000-0000-0000-0000000000bb',
+      chatId: 'c-1',
+      unassignedBy: null,
+      unassignedAt: '2026-02-02T00:00:00.000Z',
+    });
     expect(unassigned!.pages[0]!.items[0]!.assignedTo).toBeNull();
   });
 });

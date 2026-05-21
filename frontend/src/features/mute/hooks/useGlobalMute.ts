@@ -13,17 +13,17 @@ export function useGlobalMute(): UseQueryResult<GlobalMute> {
 }
 
 export interface UseGlobalMuteActionsReturn {
-  setMuted: (muted: boolean) => Promise<void>;
+  setEnabled: (enabled: boolean) => Promise<void>;
   isPending: boolean;
 }
 
 export function useGlobalMuteActions(): UseGlobalMuteActionsReturn {
   const qc = useQueryClient();
   const mut = useMutation({
-    mutationFn: (muted: boolean) => muteApi.set(muted),
-    onMutate: (muted) => {
+    mutationFn: (enabled: boolean) => muteApi.set(enabled),
+    onMutate: (enabled) => {
       const prev = qc.getQueryData<GlobalMute>(KEY);
-      qc.setQueryData<GlobalMute>(KEY, { muted });
+      qc.setQueryData<GlobalMute>(KEY, { enabled });
       return { prev };
     },
     onError: (_e, _v, ctx) => {
@@ -33,11 +33,11 @@ export function useGlobalMuteActions(): UseGlobalMuteActionsReturn {
       void qc.invalidateQueries({ queryKey: KEY });
     },
   });
-  const setMuted = useCallback(
-    async (muted: boolean) => {
-      await mut.mutateAsync(muted);
+  const setEnabled = useCallback(
+    async (enabled: boolean) => {
+      await mut.mutateAsync(enabled);
     },
     [mut],
   );
-  return { setMuted, isPending: mut.isPending };
+  return { setEnabled, isPending: mut.isPending };
 }

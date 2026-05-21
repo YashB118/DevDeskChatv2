@@ -5,7 +5,10 @@ import type { ChatId } from '@/shared/types/ids';
 import { messagesApi } from '../api/messages.api';
 import type { MessageDTO } from '../types';
 
-export function useMessages(chatId: ChatId): {
+export function useMessages(
+  chatId: ChatId,
+  session: string,
+): {
   messages: readonly MessageDTO[];
   isLoading: boolean;
   isError: boolean;
@@ -16,7 +19,7 @@ export function useMessages(chatId: ChatId): {
   const query = useInfiniteQuery({
     queryKey: keys.messages(chatId),
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => messagesApi.list(chatId, pageParam),
+    queryFn: ({ pageParam }) => messagesApi.list(chatId, session, pageParam),
     getNextPageParam: (last) => last.nextCursor,
   });
 

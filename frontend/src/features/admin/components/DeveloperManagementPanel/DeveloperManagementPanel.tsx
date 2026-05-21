@@ -16,7 +16,7 @@ import { ConfirmDialog } from '@/design-system/compounds/ConfirmDialog';
 
 export function DeveloperManagementPanel(): ReactElement {
   const { data, isLoading, isError } = useUsers();
-  const { update, remove } = useUserActions();
+  const { setDisabled, remove } = useUserActions();
   const { push } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   const [toDelete, setToDelete] = useState<AdminUserDTO | null>(null);
@@ -75,7 +75,9 @@ export function DeveloperManagementPanel(): ReactElement {
                   <Switch
                     checked={!u.disabled}
                     onCheckedChange={(next) => {
-                      void handle('Update', () => update(toUserId(u.id), { disabled: !next }));
+                      void handle(next ? 'Enable' : 'Disable', () =>
+                        setDisabled(toUserId(u.id), !next),
+                      );
                     }}
                     aria-labelledby={`enabled-${u.id}`}
                   />

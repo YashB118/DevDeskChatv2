@@ -3,6 +3,7 @@ import { AuthRepository } from '@app/modules/auth/auth.repository';
 import { ForbiddenError } from '@app/modules/auth/auth.errors';
 import { type UserDomain, UserRole } from '@app/modules/users/user.types';
 import { AssignmentRepository } from '@app/modules/assignments/assignment.repository';
+import { SocketEmitter } from '@app/realtime/socket.emitter';
 import { MuteRepository } from './mute.repository';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class MuteService {
     private readonly repo: MuteRepository,
     private readonly assignments: AssignmentRepository,
     private readonly auth: AuthRepository,
+    private readonly emitter: SocketEmitter,
   ) {}
 
   async setChatMute(actor: UserDomain, chatId: string, muted: boolean): Promise<void> {
@@ -21,6 +23,7 @@ export class MuteService {
     }
     await this.repo.setChatMute(actor.id, chatId, muted);
     await this.auth.writeAudit('mute.chat.set', actor.id, { chatId, muted });
+    this.emitter.toUser(actor.id, 'chat:muted', { chatId, muted });
   }
 
   async setGlobalMute(actor: UserDomain, enabled: boolean): Promise<{ enabled: boolean }> {

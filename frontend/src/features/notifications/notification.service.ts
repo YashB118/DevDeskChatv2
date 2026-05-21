@@ -26,7 +26,7 @@ export function shouldNotify(
   payload: MessageNewPayload,
   gates: NotificationGates,
 ): { desktop: boolean; sound: boolean; badge: boolean } {
-  if (payload.preview.fromSelf) return { desktop: false, sound: false, badge: false };
+  if (payload.message.fromMe) return { desktop: false, sound: false, badge: false };
   if (gates.globalMuted()) return { desktop: false, sound: false, badge: false };
   if (gates.chatMuted(payload.chatId)) return { desktop: false, sound: false, badge: false };
 

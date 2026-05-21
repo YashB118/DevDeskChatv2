@@ -46,7 +46,7 @@ export function useAssignments(): UseAssignmentsReturn {
 
 export interface UseAssignmentActionsReturn {
   assign: (chatId: ChatId, userId: UserId) => Promise<void>;
-  unassign: (chatId: ChatId) => Promise<void>;
+  unassign: (assignmentId: string, chatId: ChatId) => Promise<void>;
 }
 
 export function useAssignmentActions(): UseAssignmentActionsReturn {
@@ -60,29 +60,58 @@ export function useAssignmentActions(): UseAssignmentActionsReturn {
       assignmentsApi.assign(chatId, userId),
     onMutate: ({ chatId, userId }) => {
       const snaps = snapshot();
+      const placeholderId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : '00000000-0000-0000-0000-000000000000';
       for (const [key, data] of snaps) {
-        qc.setQueryData<Cache>(key, applyAssigned(data, { chatId, assignedTo: userId }));
+        qc.setQueryData<Cache>(
+          key,
+          applyAssigned(data, {
+            assignmentId: placeholderId,
+            userId,
+            chatId,
+            assignedBy: null,
+            assignedAt: new Date().toISOString(),
+          }),
+        );
       }
       return { snaps };
     },
     onError: (_e, _v, ctx) => {
       if (!ctx) return;
       for (const [key, data] of ctx.snaps) qc.setQueryData(key, data);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.assignments() });
     },
   });
 
   const unassignMut = useMutation({
-    mutationFn: (chatId: ChatId) => assignmentsApi.unassign(chatId),
-    onMutate: (chatId) => {
+    mutationFn: ({ assignmentId }: { assignmentId: string; chatId: ChatId }) =>
+      assignmentsApi.unassign(assignmentId),
+    onMutate: ({ chatId, assignmentId }) => {
       const snaps = snapshot();
       for (const [key, data] of snaps) {
-        qc.setQueryData<Cache>(key, applyUnassigned(data, { chatId }));
+        qc.setQueryData<Cache>(
+          key,
+          applyUnassigned(data, {
+            assignmentId,
+            userId: '00000000-0000-0000-0000-000000000000',
+            chatId,
+            unassignedBy: null,
+            unassignedAt: new Date().toISOString(),
+          }),
+        );
       }
       return { snaps };
     },
     onError: (_e, _v, ctx) => {
       if (!ctx) return;
       for (const [key, data] of ctx.snaps) qc.setQueryData(key, data);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.assignments() });
     },
   });
 
@@ -93,8 +122,8 @@ export function useAssignmentActions(): UseAssignmentActionsReturn {
     [assignMut],
   );
   const unassign = useCallback(
-    async (chatId: ChatId) => {
-      await unassignMut.mutateAsync(chatId);
+    async (assignmentId: string, chatId: ChatId) => {
+      await unassignMut.mutateAsync({ assignmentId, chatId });
     },
     [unassignMut],
   );

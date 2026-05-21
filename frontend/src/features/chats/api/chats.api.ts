@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { apiClient } from '@/lib/http/client';
 import type { ChatId, UserId } from '@/shared/types/ids';
 import { ChatListPageSchema, type ChatFilters, type ChatListPage } from '../types';
@@ -18,6 +19,13 @@ function serializeFilters(f: ChatFilters): Record<string, string> {
   return params;
 }
 
+const AssignmentRowSchema = z.object({
+  id: z.string().uuid(),
+});
+const AssignmentListEnvelopeSchema = z.object({
+  assignments: z.array(AssignmentRowSchema),
+});
+
 export const chatsApi = {
   async list({ filters, cursor, limit = 50 }: ListParams): Promise<ChatListPage> {
     const res = await apiClient.get<unknown>('/api/chats', {
@@ -35,14 +43,25 @@ export const chatsApi = {
   },
 
   async setMuted(chatId: ChatId, muted: boolean): Promise<void> {
-    await apiClient.patch(`/api/chats/${chatId}/mute`, { muted });
+    await apiClient.post('/api/mute/chat', { chatId, muted });
   },
 
+  /**
+   * Chat-row quick assign / unassign. Backend has no chat-scoped assignment
+   * endpoint — both operations go through `/api/admin/assignments`. Unassign
+   * needs the active assignment row's UUID, looked up via the same endpoint.
+   */
   async assign(chatId: ChatId, userId: UserId | null): Promise<void> {
     if (userId === null) {
-      await apiClient.delete(`/api/chats/${chatId}/assignment`);
+      const list = await apiClient.get<unknown>('/api/admin/assignments', {
+        params: { chatId, activeOnly: true, limit: 1 },
+      });
+      const parsed = AssignmentListEnvelopeSchema.parse(list.data);
+      const target = parsed.assignments[0];
+      if (!target) return;
+      await apiClient.delete(`/api/admin/assignments/${target.id}`);
       return;
     }
-    await apiClient.post(`/api/chats/${chatId}/assignment`, { userId });
+    await apiClient.post('/api/admin/assignments', { chatId, userId });
   },
 };

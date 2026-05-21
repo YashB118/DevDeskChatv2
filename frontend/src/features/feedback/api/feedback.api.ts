@@ -1,5 +1,5 @@
 import { apiClient } from '@/lib/http/client';
-import { FeedbackListSchema, type FeedbackList } from '../types';
+import { FeedbackListResponseSchema, type FeedbackList } from '../types';
 
 interface ListParams {
   cursor?: string | null;
@@ -8,15 +8,19 @@ interface ListParams {
 }
 
 export const feedbackApi = {
-  async list({ cursor, limit = 50, unreadOnly }: ListParams = {}): Promise<FeedbackList> {
+  /**
+   * Backend `GET /api/feedback` returns `{ feedback: [...] }` with no cursor —
+   * wrap into the paged shape the infinite-query expects.
+   */
+  async list({ cursor: _cursor, limit = 50, unreadOnly }: ListParams = {}): Promise<FeedbackList> {
     const res = await apiClient.get<unknown>('/api/feedback', {
       params: {
         limit,
-        ...(cursor ? { cursor } : {}),
-        ...(unreadOnly ? { unreadOnly: '1' } : {}),
+        ...(unreadOnly ? { unreadOnly: 'true' } : {}),
       },
     });
-    return FeedbackListSchema.parse(res.data);
+    const { feedback } = FeedbackListResponseSchema.parse(res.data);
+    return { items: feedback, nextCursor: null };
   },
 
   async markRead(id: string): Promise<void> {

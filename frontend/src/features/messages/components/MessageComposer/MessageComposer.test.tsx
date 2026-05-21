@@ -28,31 +28,21 @@ beforeEach(() => {
 });
 
 describe('MessageComposer', () => {
-  it('Enter submits, Shift+Enter inserts newline', async () => {
+  it('Enter submits with session+text body, server response is {id, stanzaId}', async () => {
     const seen = vi.fn();
     server.use(
       http.post(`${env.VITE_API_BASE_URL}/api/messages/:chatId/send`, async ({ request }) => {
-        const body = (await request.json()) as { body: string };
-        seen(body.body);
+        const body = (await request.json()) as { session: string; text: string };
+        seen(body);
         return HttpResponse.json(
-          {
-            id: 'srv-1',
-            chatId: 'c-1',
-            senderId: 'u-1',
-            body: body.body,
-            type: 'TEXT',
-            ts: Date.now(),
-            reactions: [],
-            forwarded: false,
-            status: 'confirmed',
-          },
+          { id: 'srv-1', stanzaId: 'stanza-1' },
           { status: 201 },
         );
       }),
     );
 
     const user = userEvent.setup();
-    render(wrap(<MessageComposer chatId={toChatId('c-1')} />));
+    render(wrap(<MessageComposer chatId={toChatId('c-1')} session="default" />));
     const textarea = screen.getByLabelText('Message');
 
     await user.type(textarea, 'line1');
@@ -61,7 +51,7 @@ describe('MessageComposer', () => {
     expect((textarea as HTMLTextAreaElement).value).toBe('line1\nline2');
 
     await user.keyboard('{Enter}');
-    expect(seen).toHaveBeenCalledWith('line1\nline2');
+    expect(seen).toHaveBeenCalledWith({ session: 'default', text: 'line1\nline2' });
   });
 
   it('does not submit when the trimmed body is empty', async () => {
@@ -74,7 +64,7 @@ describe('MessageComposer', () => {
     );
 
     const user = userEvent.setup();
-    render(wrap(<MessageComposer chatId={toChatId('c-1')} />));
+    render(wrap(<MessageComposer chatId={toChatId('c-1')} session="default" />));
     await user.type(screen.getByLabelText('Message'), '   ');
     await user.keyboard('{Enter}');
     expect(seen).not.toHaveBeenCalled();

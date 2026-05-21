@@ -13,3 +13,8 @@ export const ListFeedbackQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 export type ListFeedbackQuery = z.infer<typeof ListFeedbackQuerySchema>;
+
+export const MarkFeedbackSchema = z.object({
+  read: z.boolean(),
+});
+export type MarkFeedbackInput = z.infer<typeof MarkFeedbackSchema>;

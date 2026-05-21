@@ -45,6 +45,7 @@ A phase is complete only when every item under "Final deliverables" is checked.
 | **10** | ✅ Complete | Observability: logs, metrics, traces, health, audit |
 | **11** | ✅ Complete | Security hardening, rate limiting, abuse protection |
 | **12** | ⏳ Pending | Testing, CI/CD, deployment |
+| **Sync** | ✅ Complete | Frontend↔backend wire-up (shared contracts pkg, REST/event alignment, missing emits) |
 
 ---
 
@@ -1048,3 +1049,31 @@ Bring testing to the production bar, finalize CI/CD, and prepare deployment arti
 - [ ] Every new module exposes only its `service` through `exports:` — repositories and controllers stay internal.
 
 When that checklist is true at every phase boundary, the backend stays production-ready throughout the build.
+
+---
+
+# Phase Sync — Frontend ↔ Backend Wire-Up
+
+### Overview
+Bridge phase landed after backend Phase 11 + frontend Phase 10. Brings the two halves into runtime alignment.
+
+### Direction
+Per-case "meet in the middle":
+- Backend stays canonical for: admin URL namespace (`/api/admin/*`), `stanzaId` route params, `{session}` write bodies, datetime ISO strings on socket events, the FAILED ack state, react POST-toggle with `{removed}`, full assignment audit payloads.
+- Backend changed to match frontend for: feedback mark-read (`PATCH /api/feedback/:id {read:boolean}` replaces `POST /:id/read`).
+- Backend added missing emits using frontend's pre-existing schemas: `chat:read`, `chat:muted`, `user:updated`, `feedback:new`.
+- Backend added missing endpoint: `GET /api/chats/:chatId/participants` (stub returns empty list until WAHA group-members lands).
+
+### What landed
+- New workspace package `@devdesk/contracts` at [packages/contracts/](packages/contracts/) hosts the canonical Zod event schemas; backend re-exports from it (`backend/src/realtime/events.contract.ts`) and so does the frontend. Root `package.json` now declares an npm workspace.
+- `ChatsService.markRead` emits `chat:read` to the user room ([backend/src/modules/chats/chats.service.ts](backend/src/modules/chats/chats.service.ts)).
+- `MuteService.setChatMute` emits `chat:muted` to the user room ([backend/src/modules/mute/mute.service.ts](backend/src/modules/mute/mute.service.ts)).
+- `UsersService.update` / `setDisabled` / `resetPassword` emit `user:updated` to admin + affected-user rooms ([backend/src/modules/users/users.service.ts](backend/src/modules/users/users.service.ts)).
+- `FeedbackService.submit` emits `feedback:new` to admin room ([backend/src/modules/feedback/feedback.service.ts](backend/src/modules/feedback/feedback.service.ts)).
+- `FeedbackController` exposes `PATCH /api/feedback/:id` body `{read:boolean}`; old `POST /:id/read` left as a deprecated alias for one release.
+- `ChatsController` exposes `GET /api/chats/:chatId/participants` (stub).
+- `ChatPolicy` gains `assertCanRead`.
+- All four affected modules import `RealtimeModule` and inject `SocketEmitter`.
+
+### Status
+**Complete.** 48 test files pass; lint + typecheck + build green. Live cross-browser sync test deferred to Phase 12 e2e.

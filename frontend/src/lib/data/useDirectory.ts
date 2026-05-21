@@ -26,7 +26,7 @@ export function useDirectory(): UseQueryResult<{ users: DirectoryUser[] }> {
   return useQuery({
     queryKey: keys.users(),
     queryFn: async () => {
-      const res = await apiClient.get<unknown>('/api/users');
+      const res = await apiClient.get<unknown>('/api/admin/users');
       return DirectoryResponseSchema.parse(res.data);
     },
   });
