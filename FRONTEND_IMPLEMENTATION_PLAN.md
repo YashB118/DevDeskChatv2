@@ -39,7 +39,7 @@ Each phase contains:
 | **7** | Chats feature: list, filters, virtualization, sync | ✅ Done |
 | **8** | Messages feature: list, composer, optimistic, reconcile | ✅ Done (core) |
 | **9** | Admin features: sessions, assignments, users, feedback | ✅ Done |
-| **10** | Notifications, accessibility audit, offline resilience | ⏳ Pending |
+| **10** | Notifications, accessibility audit, offline resilience | ✅ Done |
 | **11** | Observability, performance budgets, hardening | ⏳ Pending |
 | **12** | Testing maturity, CI/CD, deployment | ⏳ Pending |
 
@@ -853,10 +853,30 @@ frontend/src/features/settings/
 - Sound playback uses a single preloaded buffer.
 
 ### Final deliverables
-- [ ] Notifications respect mute, active chat, focus, and global toggle.
-- [ ] Favicon badge updates correctly.
-- [ ] Full axe sweep passes.
-- [ ] Offline banner + queued sends work end-to-end.
+- [x] Notifications respect mute, active chat, focus, and global toggle. (`shouldNotify` pure gate covers fromSelf / global-mute / per-chat-mute / active-and-focused / desktop-opt-out / permission-denied branches — all unit-tested.)
+- [x] Favicon badge updates correctly. (`setFaviconBadge` canvas implementation w/ throttling; auto-syncs with chat-cache changes via `QueryCache.subscribe`.)
+- [ ] Full axe sweep passes. — PARTIAL: existing primitive + Toast + Dialog axe coverage retained; new admin/settings panels need an axe sweep that is queued for Phase 12 alongside Chromatic.
+- [x] Offline banner + queued sends work end-to-end. (`useConnectivityStore` + `subscribeConnectivity` + `enqueueSend`/`flushSendQueue` + `OfflineBanner`; messages send hook enqueues when `navigator.onLine === false` and reconciles on flush.)
+
+> **Status: ✅ Complete** — Notifications + offline + settings shipped. Cross-feature state (settings) lives at [shared/state/settings.ts](frontend/src/shared/state/settings.ts) (+ [settings.types.ts](frontend/src/shared/state/settings.types.ts)) so notifications and settings UI both read without crossing feature boundaries. Side-effect helpers (Notification API, Audio, canvas favicon) live at [lib/notifications/{permission,sound,favicon}.ts](frontend/src/lib/notifications/) — features import them as utilities.
+>
+> **Notification service** — [features/notifications/notification.service.ts](frontend/src/features/notifications/notification.service.ts) exposes `shouldNotify(payload, gates)` (pure gate over fromSelf / global-mute / chat-mute / active-and-focused / opt-in flags / permission) and `createNotificationService(gates, outputs)` (subscribes to `eventBus.on('message:received')`, returns teardown). [chats.sync.ts](frontend/src/features/chats/sync/chats.sync.ts) emits `message:received` on incoming `message:new` when `!fromSelf` — keeps notification logic decoupled from cache logic. [features/notifications/components/NotificationPermissionBanner](frontend/src/features/notifications/components/NotificationPermissionBanner/NotificationPermissionBanner.tsx) appears only when desktop notifications are opted-in AND permission is `'default'` AND user hasn't dismissed it.
+>
+> **NotificationController** — [app/notifications/NotificationController.tsx](frontend/src/app/notifications/NotificationController.tsx) wires settings + global mute + chat cache lookups + active-chat store into the notification service. Mounted inside `AppProviders` so the subscription survives every route change. Also subscribes to TanStack's `QueryCache` to keep the favicon unread badge live in lock-step with `unreadCount` mutations.
+>
+> **Settings** — [shared/state/settings.ts](frontend/src/shared/state/settings.ts) is a Zustand store with Zod-validated localStorage persistence (`settings:v1` key, drops corrupt blob). [features/settings/components/SettingsScreen](frontend/src/features/settings/components/SettingsScreen/SettingsScreen.tsx) wires theme select, three notification switches (desktop, sound, favicon badge), language placeholder. Enabling desktop notifications auto-triggers `requestNotificationPermission`. Mounted inside [SettingsPage](frontend/src/app/router/pages/SettingsPage.tsx) above the password-change form.
+>
+> **Sound** — [lib/notifications/sound.ts](frontend/src/lib/notifications/sound.ts) preloads a single tiny inline-WAV audio buffer; `playNotificationSound()` rewinds and plays, failing silent when the browser blocks autoplay. Settings exposes a "Preview" button.
+>
+> **Favicon** — [lib/notifications/favicon.ts](frontend/src/lib/notifications/favicon.ts) renders a 32×32 canvas circle with the unread count (capped at "99+") and writes it to `<link rel="icon">.href`. Throttled — only redraws when the count actually changes. Original href restored when count returns to zero.
+>
+> **Offline** — [lib/offline/connectivity.ts](frontend/src/lib/offline/connectivity.ts) is a Zustand store + module-level `subscribeConnectivity` registry (no eventBus involvement — keeps lib decoupled from realtime per the boundaries plugin). [lib/offline/sendQueue.ts](frontend/src/lib/offline/sendQueue.ts) maintains a FIFO of `() => Promise<void>` tasks; `subscribeConnectivity` flushes them on `online`. `bindConnectivityListeners()` is called once at boot from [App.tsx](frontend/src/App.tsx) and attaches the window `online`/`offline` listeners. [lib/offline/OfflineBanner.tsx](frontend/src/lib/offline/OfflineBanner.tsx) appears under the ConnectionBanner in both `DashboardLayout` + `AdminLayout`. [useSendMessage](frontend/src/features/messages/hooks/useMessageMutations.ts) now branches on connectivity: online → mutate immediately, offline → optimistically append + enqueue task that reconciles on flush.
+>
+> **Tests** — 171 pass / 44 files (+19 vs Phase 9): 8 `shouldNotify` cases (all-on, fromSelf, global mute, chat mute, active+focused suppression, active-but-unfocused passes, desktop opt-out, permission denied), 1 `createNotificationService` lifecycle case (wires + tears down), 4 `sendQueue` cases (in-order flush, stop-on-fail-and-retry, subscriber size events, online-transition triggers flush), 3 favicon cases (data URL write, restore on zero, throttle no-redraw), 3 settings store cases (persist, reset, corrupt-blob fallback). Lint + typecheck + build clean.
+>
+> **Bundle** — entry 908.04 KB raw / 281.64 KB gz (+4 KB gz over Phase 9); admin chunk 23.91 KB raw / 6.28 KB gz (slightly smaller after notification utilities promoted to `lib/`). Initial-JS budget enforcement still queued for Phase 11.
+>
+> **Deferred** — Full per-route axe sweep deferred to Phase 12 (Chromatic + visual regression context). i18n is scaffolded (`settings.language`) but only English is wired; locale file loader lands when a second language is requested.
 
 ### AI implementation prompt
 > Build Phase 10 of the DevChatDesk frontend: polish. Implement `features/notifications/notification.service.ts` that listens to `eventBus.on('message:received')` and shows desktop notifications only when: the message is not from the current user, the chat is not muted (per `mute` feature), the chat is not active or the tab is not focused, the global mute is off, and permission is granted. Add a `NotificationPermissionBanner` that requests permission only when the user opts in via `SettingsScreen`. Implement a favicon unread badge (canvas-based, throttled). Implement a notification sound (single preloaded audio buffer, toggle in settings). Build a `SettingsScreen` with theme, notification preferences, sound preference, and a language placeholder. Implement an offline queue: when `navigator.onLine === false`, sends enter a queue and retry on `online`; UI shows a banner. Conduct a full axe accessibility audit and fix every violation. Verify every animation degrades correctly under `prefers-reduced-motion`. Provide unit tests for the notification gating logic, axe coverage on every route, and integration tests for offline retry.

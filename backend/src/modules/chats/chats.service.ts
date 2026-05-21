@@ -44,7 +44,13 @@ const EnrichedChatSchema = z.object({
   muted: z.boolean(),
 });
 
-const CachedChatListSchema = z.array(EnrichedChatSchema);
+export const CachedChatListSchema = z.array(EnrichedChatSchema);
+export const chatsListCacheKey = (
+  userId: string,
+  session: string,
+  limit: number,
+  offset: number,
+): string => `chats:list:${userId}:${session}:${limit.toString()}:${offset.toString()}`;
 
 @Injectable()
 export class ChatsService {
@@ -141,7 +147,7 @@ export class ChatsService {
   }
 
   private cacheKey(userId: string, query: ListChatsQuery): string {
-    return `chats:list:${userId}:${query.session}:${String(query.limit)}:${String(query.offset)}`;
+    return chatsListCacheKey(userId, query.session, query.limit, query.offset);
   }
 
   private async invalidateUserCache(userId: string): Promise<void> {

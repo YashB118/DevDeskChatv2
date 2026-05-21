@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { ZodError, type ZodTypeAny } from 'zod';
 import { ValidationError } from '@app/shared/errors';
+import {
+  METRIC_OUTCOME,
+  queueJobDuration,
+  queueJobsTotal,
+} from '@app/shared/observability/metrics.registry';
 import { type JobEnvelope, type PayloadOf } from './job.types';
 
 export interface HarnessContext {
@@ -46,10 +51,12 @@ export class WorkerHarness {
     try {
       const result = await handler(parsed, ctx);
       const durationMs = this.elapsedMs(start);
+      this.recordOutcome(job, METRIC_OUTCOME.SUCCESS, durationMs);
       this.logger.log(`queue.job.success ${this.format({ ...base, durationMs })}`);
       return result;
     } catch (err) {
       const durationMs = this.elapsedMs(start);
+      this.recordOutcome(job, METRIC_OUTCOME.FAILURE, durationMs);
       const message = err instanceof Error ? err.message : String(err);
       const name = err instanceof Error ? err.name : 'UnknownError';
       this.logger.error(
@@ -57,6 +64,16 @@ export class WorkerHarness {
       );
       throw err;
     }
+  }
+
+  private recordOutcome(
+    job: Job<JobEnvelope<unknown>>,
+    outcome: 'success' | 'failure',
+    durationMs: number,
+  ): void {
+    const labels = { queue: job.queueName, jobName: job.name, outcome };
+    queueJobDuration.observe(labels, durationMs / 1000);
+    queueJobsTotal.inc(labels);
   }
 
   private parsePayload<S extends ZodTypeAny>(

@@ -12,6 +12,9 @@ import { JwtAuthGuard } from '@app/common/guards/jwt-auth.guard';
 import { AdminGuard } from '@app/common/guards/admin.guard';
 import { ZodBody } from '@app/common/decorators/zod-body.decorator';
 import { ZodValidationPipe } from '@app/common/pipes/zod-validation.pipe';
+import { CurrentUser } from '@app/common/decorators/current-user.decorator';
+import { type AuthenticatedRequestUser } from '@app/modules/auth/auth.types';
+import { UserId } from '@app/shared/types/ids';
 import {
   CreateSessionSchema,
   type CreateSessionInput,
@@ -60,32 +63,38 @@ export class SessionsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@ZodBody(CreateSessionSchema) body: CreateSessionInput): Promise<SessionResponse> {
-    return toResponse(await this.service.create(body));
+  async create(
+    @ZodBody(CreateSessionSchema) body: CreateSessionInput,
+    @CurrentUser() actor: AuthenticatedRequestUser,
+  ): Promise<SessionResponse> {
+    return toResponse(await this.service.create(body, UserId(actor.id)));
   }
 
   @Post(':name/start')
   @HttpCode(HttpStatus.OK)
   async start(
     @Param('name', new ZodValidationPipe(SessionNameParamSchema)) name: string,
+    @CurrentUser() actor: AuthenticatedRequestUser,
   ): Promise<SessionResponse> {
-    return toResponse(await this.service.start(name));
+    return toResponse(await this.service.start(name, UserId(actor.id)));
   }
 
   @Post(':name/stop')
   @HttpCode(HttpStatus.OK)
   async stop(
     @Param('name', new ZodValidationPipe(SessionNameParamSchema)) name: string,
+    @CurrentUser() actor: AuthenticatedRequestUser,
   ): Promise<SessionResponse> {
-    return toResponse(await this.service.stop(name));
+    return toResponse(await this.service.stop(name, UserId(actor.id)));
   }
 
   @Delete(':name')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('name', new ZodValidationPipe(SessionNameParamSchema)) name: string,
+    @CurrentUser() actor: AuthenticatedRequestUser,
   ): Promise<void> {
-    await this.service.delete(name);
+    await this.service.delete(name, UserId(actor.id));
   }
 
   @Get(':name/qr')

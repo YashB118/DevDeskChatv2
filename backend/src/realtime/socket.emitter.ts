@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { APP_CONFIG } from '@app/config/constants';
 import { type AppConfig } from '@app/config/env';
+import { roomKindFor, socketEventsEmittedTotal } from '@app/shared/observability/metrics.registry';
 import { OutboundEvents, type OutboundEventName, type OutboundPayload } from './events.contract';
 import { RealtimeGateway } from './realtime.gateway';
 import { roomFor } from './socket.rooms';
@@ -45,6 +46,7 @@ export class SocketEmitter {
   ): void {
     if (!this.checkPayload(event, payload)) return;
     this.server().to(socketId).emit(event, payload);
+    socketEventsEmittedTotal.inc({ event, room_kind: roomKindFor(socketId) });
   }
 
   /**
@@ -79,6 +81,7 @@ export class SocketEmitter {
   ): void {
     if (!this.checkPayload(event, payload)) return;
     this.server().to(room).emit(event, payload);
+    socketEventsEmittedTotal.inc({ event, room_kind: roomKindFor(room) });
   }
 
   private checkPayload<E extends OutboundEventName>(

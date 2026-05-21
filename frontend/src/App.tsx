@@ -4,8 +4,10 @@ import { AppProviders } from '@/app/providers/AppProviders';
 import { AppRouter } from '@/app/router/AppRouter';
 import { Styleguide } from '@/app/ui/Styleguide';
 import { ensureFeatureSyncRegistered } from '@/app/sync/featureSync';
+import { bindConnectivityListeners } from '@/lib/offline/connectivity';
 
 ensureFeatureSyncRegistered();
+bindConnectivityListeners();
 
 function isStyleguidePath(): boolean {
   if (typeof window === 'undefined') return false;

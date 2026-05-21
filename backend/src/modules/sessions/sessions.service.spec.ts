@@ -3,6 +3,7 @@ import { SessionsService } from './sessions.service';
 import { type SessionRepository } from './session.repository';
 import { type WahaService } from '@app/integrations/waha/waha.service';
 import { type SocketEmitter } from '@app/realtime/socket.emitter';
+import { type AuthRepository } from '@app/modules/auth/auth.repository';
 import { type SessionDomain } from './session.types';
 import { SessionNotFoundError } from './sessions.errors';
 import { SessionId } from '@app/shared/types/ids';
@@ -22,6 +23,7 @@ interface Stubs {
   repo: SessionRepository;
   waha: WahaService;
   emitter: SocketEmitter;
+  auth: { writeAudit: ReturnType<typeof vi.fn> };
 }
 
 function buildStubs(): Stubs {
@@ -42,6 +44,7 @@ function buildStubs(): Stubs {
       invalidateSession: vi.fn(),
     } as unknown as WahaService,
     emitter: { toAdmins: vi.fn() } as unknown as SocketEmitter,
+    auth: { writeAudit: vi.fn() },
   };
 }
 
@@ -51,7 +54,12 @@ describe('SessionsService', () => {
 
   beforeEach(() => {
     stubs = buildStubs();
-    svc = new SessionsService(stubs.repo, stubs.waha, stubs.emitter);
+    svc = new SessionsService(
+      stubs.repo,
+      stubs.waha,
+      stubs.emitter,
+      stubs.auth as unknown as AuthRepository,
+    );
   });
 
   it('throws SessionNotFoundError when getting a missing session', async () => {

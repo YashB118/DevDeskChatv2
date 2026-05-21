@@ -28,6 +28,7 @@
 
 The `bootstrap()` async function performs the following ordered steps. Order is load-bearing; do not reshuffle without understanding the effects.
 
+0. **Start OpenTelemetry** via `startTelemetry()` — invoked at the very top of `main.ts` *before* the `AppModule` import. When `OTEL_ENABLED=true` the SDK dynamically loads `@opentelemetry/sdk-node` + `auto-instrumentations-node` (fs opted out) and patches `express` / `pg` / `ioredis` / `axios` / `bullmq` before NestJS resolves them. Returns a handle whose `shutdown()` is wired to `SIGTERM`/`SIGINT` at the bottom of `bootstrap()`. When disabled the handle is a noop; nothing else changes.
 1. **Create the application** with `NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true })`. `bufferLogs` keeps startup logs queued until the Pino logger is attached. The factory also triggers `DatabaseModule` (TypeORM connect) and `CacheModule` (ioredis connect) initialisation — if either fails the process exits non-zero before HTTP listens.
 2. **Switch the logger** via `app.useLogger(app.get(Logger))` so subsequent Nest framework logs (route resolution, lifecycle, exceptions) emit through Pino.
 3. **Resolve `APP_CONFIG`** to read the parsed env once. No other process is allowed to read `process.env` directly.
@@ -39,6 +40,7 @@ The `bootstrap()` async function performs the following ordered steps. Order is 
 9. **Set body parser limits** for both JSON and urlencoded via `app.useBodyParser(...)`, sourced from `BODY_LIMIT`.
 10. **Apply the `/api` global prefix** via `app.setGlobalPrefix('api', { exclude: [{ path: 'health/(.*)', method: RequestMethod.ALL }] })`. Every business controller (`AuthController` and successors) is now served under `/api/...`; the health endpoints intentionally stay at `/health/live` and `/health/ready` so orchestrator probes do not need to learn a prefix.
 11. **Install the global exception filter** `new AllExceptionsFilter()`. This is the only place that filter is registered.
+11a. **Install the global metrics interceptor** via `app.useGlobalInterceptors(app.get(MetricsInterceptor))`. Records `http_request_duration_seconds` / `http_requests_total` against the matched route pattern (Phase 10). Three additional global interceptors are registered as APP_INTERCEPTOR providers inside `AppModule` rather than from `main.ts` so they participate in normal DI (Phase 11): `GlobalRateLimitInterceptor` (IP + per-user floors), `RouteRateLimitInterceptor` (descriptor-driven, supports `@RateLimit({preset, mode, identify, softCache?})` with hard 429 or soft cached fallback), and `RequestTimeoutInterceptor` (`REQUEST_TIMEOUT_MS` budget — surfaces `RequestTimeoutError`/503).
 12. **Register the Socket.IO Redis adapter** via `app.useWebSocketAdapter(new SocketRedisAdapter(app))` — must happen **before** `listen()` so the adapter is wired in before any WS upgrade is accepted. The adapter pulls the existing ioredis client out of `CacheModule` via DI; no second Redis connection is opened.
 13. **Enable shutdown hooks** with `app.enableShutdownHooks()`. This is required so `CacheModule.OnApplicationShutdown` runs (`redis.quit()`) and Nest's TypeORM lifecycle closes the DataSource on SIGTERM. The Socket.IO server shuts down through the same mechanism. Phase 5+ will lean on it again for BullMQ workers.
 14. **Start listening** on `PORT`, then emit a single info-level log line with the bound URL.
@@ -83,9 +85,11 @@ If a future change wants a global pipe (e.g., for query string defaults), do it 
 
 ## 9. Future evolution
 
-Phase 3 added `UsersModule` + `AuthModule`, `cookie-parser`, the `/api` prefix, and per-controller `JwtAuthGuard`. Phase 4 added `RealtimeModule` and the Socket.IO Redis adapter (in progress — gateway + handshake wired; contract docs land with phase closure). Still pending:
+Phase 3 added `UsersModule` + `AuthModule`, `cookie-parser`, the `/api` prefix, and per-controller `JwtAuthGuard`. Phase 4 added `RealtimeModule` and the Socket.IO Redis adapter. Phase 5 added `QueueModule`. Phases 6–9 layered WAHA + domain modules + collaboration on top. Phase 10 added `MetricsModule` and the OTel `startTelemetry()` import that must sit at the very top of `main.ts`. Phase 11 added `RateLimitModule` (Redis sliding-window service + two global APP_INTERCEPTOR providers), `RequestTimeoutInterceptor`, and a strict API-only `helmet()` posture (`default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`, HSTS configured via `HSTS_MAX_AGE_SECONDS`, COOP/CORP set, plus a `Permissions-Policy` middleware denying every powerful browser feature).
 
-- `BullModule.forRootAsync` + `BullModule.registerQueue(...)` imports on `AppModule` (Phase 5).
-- A custom rate-limit module bound globally (Phase 11).
+Still pending:
+
+- Backend beacons endpoint for the frontend Phase 11 observability surface.
+- Multi-stage Dockerfile, Kubernetes manifests, partition-maintenance CronJob, and the GitHub Actions deploy pipeline (Phase 12).
 
 Each of those will get its own doc page; this file's responsibilities will not shrink.

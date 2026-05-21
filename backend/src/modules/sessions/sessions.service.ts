@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WahaService } from '@app/integrations/waha/waha.service';
 import { SocketEmitter } from '@app/realtime/socket.emitter';
+import { AuthRepository } from '@app/modules/auth/auth.repository';
+import { type UserId } from '@app/shared/types/ids';
 import { SessionRepository } from './session.repository';
 import { type SessionDomain, type SessionStatus } from './session.types';
 import { type CreateSessionInput } from './session.schema';
@@ -14,6 +16,7 @@ export class SessionsService {
     private readonly repo: SessionRepository,
     private readonly waha: WahaService,
     private readonly emitter: SocketEmitter,
+    private readonly auth: AuthRepository,
   ) {}
 
   list(): Promise<SessionDomain[]> {
@@ -26,33 +29,37 @@ export class SessionsService {
     return row;
   }
 
-  async create(input: CreateSessionInput): Promise<SessionDomain> {
+  async create(input: CreateSessionInput, actorId: UserId | null = null): Promise<SessionDomain> {
     const session = await this.repo.upsertByName({
       name: input.name,
       status: 'STARTING',
       config: input.config ?? null,
     });
     await this.waha.startSession(input.name);
+    await this.auth.writeAudit('session.create', actorId, { name: input.name });
     return session;
   }
 
-  async start(name: string): Promise<SessionDomain> {
+  async start(name: string, actorId: UserId | null = null): Promise<SessionDomain> {
     const session = await this.repo.upsertByName({ name, status: 'STARTING' });
     await this.waha.startSession(name);
+    await this.auth.writeAudit('session.start', actorId, { name });
     return session;
   }
 
-  async stop(name: string): Promise<SessionDomain> {
+  async stop(name: string, actorId: UserId | null = null): Promise<SessionDomain> {
     await this.assertExists(name);
     await this.waha.stopSession(name);
     await this.repo.updateStatus(name, 'STOPPED');
+    await this.auth.writeAudit('session.stop', actorId, { name });
     return this.get(name);
   }
 
-  async delete(name: string): Promise<void> {
+  async delete(name: string, actorId: UserId | null = null): Promise<void> {
     await this.assertExists(name);
     await this.waha.deleteSession(name);
     await this.repo.deleteByName(name);
+    await this.auth.writeAudit('session.delete', actorId, { name });
   }
 
   qr(name: string): Promise<{ mimetype: string; data: string }> {

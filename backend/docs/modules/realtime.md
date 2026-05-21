@@ -59,6 +59,8 @@ Outbound surface today: `pong`, `error:invalid_payload`, `message:new`, `message
 
 `SocketEmitter.disconnectUser(userId)` (Phase 9) is the imperative complement: `UsersService.setDisabled(_, true, _)` and `UsersService.resetPassword(...)` call it outside their transactions so an admin disabling a developer immediately severs any live socket session.
 
+Phase 10 metrics: every successful `SocketEmitter.emit` increments `socket_events_emitted_total{event, room_kind}` (room kind is `user` / `chat` / `admin` / `socket` / `other`, derived by `roomKindFor`). `RealtimeGateway.handleConnection` / `handleDisconnect` move `active_socket_connections` up and down so the Prom gauge always reflects authenticated clients only (rejected handshakes never enter the count).
+
 ## 4. Rooms
 
 Centralized in `socket.rooms.ts`:

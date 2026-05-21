@@ -4,6 +4,7 @@ import { ToastProvider } from '@/design-system/primitives/Toast';
 import { AuthProvider } from '@/features/auth';
 import { QueryProvider } from '@/app/providers/QueryProvider';
 import { SocketProvider, SyncController } from '@/realtime';
+import { NotificationController } from '@/app/notifications/NotificationController';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -16,7 +17,9 @@ export function AppProviders({ children }: AppProvidersProps): ReactElement {
         <AuthProvider>
           <SocketProvider>
             <SyncController>
-              <ToastProvider>{children}</ToastProvider>
+              <ToastProvider>
+                <NotificationController>{children}</NotificationController>
+              </ToastProvider>
             </SyncController>
           </SocketProvider>
         </AuthProvider>

@@ -104,6 +104,7 @@ Every state-changing operation calls `AuthRepository.writeAudit(event, userId, p
 - Users (Phase 9, written by `UsersService`): `user.create`, `user.update`, `user.disable`, `user.enable`, `user.password.reset`.
 - Assignments (Phase 9, written by `AssignmentsService`): `assignment.create`, `assignment.remove`.
 - Mute (Phase 9, written by `MuteService`): `mute.chat.set`, `mute.global.set`.
+- Sessions (Phase 10, written by `SessionsService`): `session.create`, `session.start`, `session.stop`, `session.delete`.
 
 `audit_log` is range-partitioned monthly by `created_at` (see [db.md](db.md) §6). New events incur no schema work — the table accepts any `event` string.
 

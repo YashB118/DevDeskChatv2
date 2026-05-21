@@ -167,7 +167,7 @@ When extending the schema, add equivalent coverage.
 
 This module sits at the bottom of the dependency graph; no other module may import from it transitively in ways that create cycles.
 
-## 11. Phase 5–7 additions
+## 11. Phase 5–11 additions
 
 Already live in the schema:
 
@@ -175,13 +175,14 @@ Already live in the schema:
 - **WAHA HTTP client (Phase 6):** `WAHA_BASE_URL` (required), `WAHA_API_KEY?`, `WAHA_TIMEOUT_MS`, `WAHA_MEDIA_TIMEOUT_MS`, `WAHA_RETRY_MAX`, `WAHA_RETRY_BASE_MS`, `WAHA_CB_FAILURE_THRESHOLD`, `WAHA_CB_COOLDOWN_MS`, `WAHA_SESSIONS_CACHE_TTL_MS`, `WAHA_CHATS_CACHE_TTL_MS`, `WAHA_STATUS_CACHE_TTL_MS`.
 - **WAHA NOWEB SQLite store (Phase 6):** `WAHA_STORE_PATH` (required), `WAHA_STORE_REQUIRE_READONLY` (default `false`; flip to `true` in prod where the file is mounted read-only), `WAHA_STORE_CACHE_TTL_MS`.
 - **Webhook ingestion (Phase 7):** `WAHA_WEBHOOK_HMAC_SECRET?` (optional — unset disables HMAC verification), `WAHA_WEBHOOK_HMAC_HEADER` (default `x-webhook-hmac`), `PENDING_MESSAGE_TTL_MS` (default 9000ms — must outlive the WAHA round-trip + webhook delivery latency).
+- **Observability (Phase 10):** `OTEL_ENABLED` (default `false`), `OTEL_SERVICE_NAME` (default `devdeskchat-backend`), `OTEL_EXPORTER_OTLP_ENDPOINT?` (OTLP HTTP collector URL — unset = SDK runs without exporter, spans dropped), `OTEL_TRACES_SAMPLER_RATIO` (default `1`, range 0..1 for `TraceIdRatioBasedSampler`), `METRICS_BEARER_TOKEN?` (gates `GET /metrics` — unset = endpoint refuses every request), `HEALTH_WAHA_CACHE_TTL_MS` (default 15000), `HEALTH_WAHA_TIMEOUT_MS` (default 2500). Note: `telemetry.ts` is the **single** approved violator of the "no `process.env` outside `env.ts`" rule because it must run before `loadEnv`.
+- **Security hardening (Phase 11):** `RATE_LIMIT_ENABLED` (default `true`; master toggle, both rate-limit interceptors short-circuit when false), `REQUEST_TIMEOUT_MS` (default `30000`; `RequestTimeoutInterceptor` budget), `RATE_LIMIT_IP_WINDOW_SECONDS` / `RATE_LIMIT_IP_MAX` (default `60` / `600`; global IP floor), `RATE_LIMIT_USER_WINDOW_SECONDS` / `RATE_LIMIT_USER_MAX` (default `60` / `300`; per-authenticated-user floor), `RATE_LIMIT_AUTH_WINDOW_SECONDS` / `RATE_LIMIT_AUTH_MAX` (default `900` / `5`; per-email login attempts on `POST /api/auth/login`), `RATE_LIMIT_SEND_WINDOW_SECONDS` / `RATE_LIMIT_SEND_MAX` (default `10` / `30`; per-user budget on `POST /api/messages/:chatId/send|media|forward`), `RATE_LIMIT_CHATS_WINDOW_SECONDS` / `RATE_LIMIT_CHATS_MAX` (default `5` / `10`; soft budget on `GET /api/chats` — serves the `CacheService.wrap` blob with `X-RateLimit-Cached: true`), `HSTS_MAX_AGE_SECONDS` (default `63072000`; helmet HSTS `max-age`).
 
 ## 12. Future evolution
 
 Anticipated additions in later phases:
 
-- Mute / assignment knobs (Phase 9 — if any are configurable).
-- Observability endpoints + metric-export tokens (Phase 10).
-- Rate-limit knobs, feature flags (Phase 11).
+- Per-route limiter knobs for the webhook ingress if WAHA delivery patterns demand a dedicated higher-burst cap (Phase 11+).
+- Backend beacons endpoint config for the frontend Phase 11 observability surface.
 
 All of these enter through the same schema; do not split into multiple config files.

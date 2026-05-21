@@ -13,6 +13,7 @@ import {
   type MessageNewPayload,
 } from '@/realtime/events.contract';
 import { keys } from '@/shared/state/queryKeys';
+import { eventBus } from '@/realtime/eventBus';
 import type { ChatListPage } from '../types';
 import {
   applyAssigned,
@@ -42,6 +43,9 @@ function makeListener<T>(schema: { safeParse: (raw: unknown) => { success: true;
 export function registerChatsSync(socket: AppSocket, qc: QueryClient): () => void {
   const onMessageNew = makeListener<MessageNewPayload>(MessageNewSchema, (payload) => {
     updateAllChatLists(qc, (data) => bumpChatWithMessage(data, payload));
+    if (!payload.preview.fromSelf) {
+      eventBus.emit('message:received', payload);
+    }
   });
   const onAssigned = makeListener<ChatAssignedPayload>(ChatAssignedSchema, (payload) => {
     updateAllChatLists(qc, (data) => applyAssigned(data, payload));

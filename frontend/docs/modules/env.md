@@ -21,7 +21,7 @@ Frontends fail silently when env vars are misnamed, missing, or malformed — th
 | Key | Type | Required | Default | Used by |
 |---|---|---|---|---|
 | `VITE_API_BASE_URL` | URL | Yes | — | ✅ Phase 3 — read by `lib/http/client.ts` as the axios `baseURL`. |
-| `VITE_SOCKET_URL` | URL | Yes | — | Socket.IO client (Phase 5) |
+| `VITE_SOCKET_URL` | URL | Yes | — | ✅ Phase 5 — read by `realtime/socket.ts` (`io(env.VITE_SOCKET_URL, ...)`). |
 | `VITE_APP_ENV` | `'development' \| 'staging' \| 'production'` | No | `'development'` | Logging, Sentry env tag (Phase 11) |
 | `VITE_SENTRY_DSN` | string | No | `''` | Sentry init (Phase 11). Empty string disables Sentry. |
 

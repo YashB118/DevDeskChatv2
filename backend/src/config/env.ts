@@ -99,6 +99,43 @@ export const EnvSchema = z.object({
   WAHA_WEBHOOK_HMAC_HEADER: z.string().min(1).default('x-webhook-hmac'),
   // Pending-send reconciliation window (must outlive the WAHA round-trip).
   PENDING_MESSAGE_TTL_MS: z.coerce.number().int().positive().default(9000),
+
+  // Observability (Phase 10)
+  // Master switch — defaults off so unit tests / local dev don't pay the
+  // auto-instrumentation startup cost. Enable in staging / production.
+  OTEL_ENABLED: boolish.default('false'),
+  OTEL_SERVICE_NAME: z.string().min(1).default('devdeskchat-backend'),
+  // OTLP HTTP exporter endpoint (e.g. http://otel-collector:4318/v1/traces).
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  // Sample rate 0..1 — defaults to "always" so an unsampled deploy is the
+  // explicit choice, not the accidental one.
+  OTEL_TRACES_SAMPLER_RATIO: z.coerce.number().min(0).max(1).default(1),
+  // Token gating `/metrics`. When unset the endpoint refuses every request —
+  // never accidentally expose it on a public ingress.
+  METRICS_BEARER_TOKEN: z.string().min(8).optional(),
+  // WAHA reachability probe — added to /health/ready. Result cached for this
+  // many ms so terminus pings don't hammer the upstream.
+  HEALTH_WAHA_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(15000),
+  HEALTH_WAHA_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
+
+  // Security hardening (Phase 11)
+  // Global toggle. Off in unit tests so route handlers stay deterministic.
+  RATE_LIMIT_ENABLED: boolish.default('true'),
+  // Hard 30s request budget. Express `req.setTimeout` + interceptor enforce.
+  REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  // Per-layer windows + caps. Defaults mirror BACKEND_ARCHITECTURE.md §15.
+  RATE_LIMIT_IP_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_IP_MAX: z.coerce.number().int().positive().default(600),
+  RATE_LIMIT_USER_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_USER_MAX: z.coerce.number().int().positive().default(300),
+  RATE_LIMIT_AUTH_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
+  RATE_LIMIT_AUTH_MAX: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_SEND_WINDOW_SECONDS: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_SEND_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_CHATS_WINDOW_SECONDS: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_CHATS_MAX: z.coerce.number().int().positive().default(10),
+  // Strict-Transport-Security max-age (seconds). 2 years default.
+  HSTS_MAX_AGE_SECONDS: z.coerce.number().int().nonnegative().default(63072000),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

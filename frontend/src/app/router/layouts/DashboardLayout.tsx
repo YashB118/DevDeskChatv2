@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { LogoutButton, useAuth } from '@/features/auth';
 import { ChatSidebar, useSyncActiveChatFromUrl } from '@/features/chats';
 import { ConnectionBanner } from '@/realtime';
+import { OfflineBanner } from '@/lib/offline/OfflineBanner';
+import { NotificationPermissionBanner } from '@/features/notifications';
 import { routes } from '../routes';
 
 export function DashboardLayout(): ReactElement {
@@ -14,6 +16,8 @@ export function DashboardLayout(): ReactElement {
     <div className="grid min-h-screen grid-cols-[240px_320px_1fr] grid-rows-[auto_1fr] bg-[var(--color-bg-canvas)] text-[var(--color-fg-primary)]">
       <div className="col-span-3">
         <ConnectionBanner />
+        <OfflineBanner />
+        <NotificationPermissionBanner />
       </div>
       <aside
         aria-label="Primary navigation"

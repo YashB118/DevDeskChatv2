@@ -2,6 +2,12 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { APP_CONFIG } from '@app/config/constants';
 import { type AppConfig } from '@app/config/env';
 import { ExternalServiceError } from '@app/shared/errors';
+import {
+  METRIC_OUTCOME,
+  wahaCircuitState,
+  wahaRequestDuration,
+  wahaRequestsTotal,
+} from '@app/shared/observability/metrics.registry';
 import { CircuitBreaker } from './circuit-breaker';
 import { TtlCache } from './ttl-cache';
 import { WahaClient } from './waha.client';
@@ -189,7 +195,9 @@ export class WahaService {
   }
 
   private async callIdempotent<R>(method: string, fn: () => Promise<R>): Promise<R> {
-    return this.breaker(method).exec(() => this.retryable(method, fn));
+    return this.instrument(method, () =>
+      this.breaker(method).exec(() => this.retryable(method, fn)),
+    );
   }
 
   private async mutate<R>(
@@ -197,7 +205,7 @@ export class WahaService {
     fn: () => Promise<R>,
     afterSuccess: (() => void)[] = [],
   ): Promise<R> {
-    const result = await this.breaker(method).exec(fn);
+    const result = await this.instrument(method, () => this.breaker(method).exec(fn));
     for (const cb of afterSuccess) {
       try {
         cb();
@@ -206,6 +214,29 @@ export class WahaService {
       }
     }
     return result;
+  }
+
+  private async instrument<R>(method: string, fn: () => Promise<R>): Promise<R> {
+    const start = process.hrtime.bigint();
+    try {
+      const out = await fn();
+      this.recordCall(method, METRIC_OUTCOME.SUCCESS, start);
+      return out;
+    } catch (err) {
+      this.recordCall(method, METRIC_OUTCOME.FAILURE, start);
+      throw err;
+    }
+  }
+
+  private recordCall(method: string, outcome: string, start: bigint): void {
+    const durationSec = Number(process.hrtime.bigint() - start) / 1_000_000_000;
+    wahaRequestDuration.observe({ method, outcome }, durationSec);
+    wahaRequestsTotal.inc({ method, outcome });
+    const status = this.breakers.get(method)?.status();
+    if (status !== undefined) {
+      const value = status.state === 'open' ? 2 : status.state === 'half-open' ? 1 : 0;
+      wahaCircuitState.set({ method }, value);
+    }
   }
 
   private async retryable<R>(method: string, fn: () => Promise<R>): Promise<R> {

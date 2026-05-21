@@ -28,15 +28,20 @@ The frontend is one of two siblings in this repository; the backend lives separa
 | Build | Vite 6 |
 | Language | TypeScript 5.7, strict mode + `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax` |
 | Runtime validation | Zod |
-| State (planned) | TanStack Query v5 (server state), Zustand (UI state), Dexie/IndexedDB (persistence) |
-| Real-time (planned) | Socket.IO client, single instance |
-| Routing (planned) | React Router 7 data routers |
+| Server state | TanStack Query v5 — `staleTime: Infinity`, socket-driven sync |
+| UI state | Zustand — per-feature slices + cross-feature stores in `shared/state/` |
+| Persistence | Dexie (IndexedDB) — snapshot table + 200 MB LRU `mediaBlobs`; debounced write-through |
+| Real-time | Socket.IO client, single module-level singleton above the router |
+| Routing | React Router 7 data routers, composable guards, lazy admin chunk |
 | Styling | Tailwind v4 (`@tailwindcss/vite`) + CSS variable design tokens (light / dark / high-contrast) |
 | Primitives | Radix UI + `class-variance-authority` + `clsx` + `tailwind-merge` |
 | Animation | Framer Motion + `usePrefersReducedMotion` fallbacks |
+| Virtualization | `react-virtuoso` (chat list, message list, assignments) |
+| Forms | React Hook Form + `@hookform/resolvers` (Zod) |
+| HTTP | Axios singleton w/ silent-refresh interceptor + Zod-parsed responses |
 | Icons | `lucide-react` (curated re-exports from `design-system/icons`) |
 | Storybook | Storybook 8 + `@storybook/react-vite` + `@storybook/addon-a11y` |
-| Test | Vitest 3 + @testing-library/react + jsdom + `vitest-axe` matchers; Playwright planned for E2E |
+| Test | Vitest 3 + @testing-library/react + jsdom + `vitest-axe` matchers + `fake-indexeddb` + MSW; Playwright queued for Phase 12 |
 | Lint | ESLint 9 flat config + typescript-eslint strict-type-checked + react-hooks + jsx-a11y + boundaries |
 | CI | GitHub Actions — lint → typecheck → test → build |
 
@@ -46,29 +51,43 @@ The frontend is one of two siblings in this repository; the backend lives separa
 frontend/
 ├── src/
 │   ├── main.tsx                    # entry
-│   ├── App.tsx                     # boot orchestrator
+│   ├── App.tsx                     # boot orchestrator (feature sync register + connectivity bind)
 │   ├── app/
-│   │   ├── providers/AppProviders.tsx
+│   │   ├── providers/{AppProviders,QueryProvider}.tsx
 │   │   ├── errors/AppErrorBoundary.tsx
-│   │   ├── ui/BootGate.tsx
-│   │   └── router/                 # populated in Phase 4
-│   ├── features/<feature>/         # auth, chats, messages, sessions, etc.
-│   │   ├── api/                    # axios-backed module
+│   │   ├── notifications/NotificationController.tsx   # message:received → desktop/sound/favicon
+│   │   ├── router/{AppRouter,routes,lazyRoutes,RouteErrorBoundary,guards,layouts,pages,hooks}
+│   │   ├── sync/featureSync.ts                        # ensureFeatureSyncRegistered
+│   │   └── ui/{BootGate,Styleguide}.tsx
+│   ├── features/<feature>/         # auth, chats, messages, sessions, assignments, admin, feedback, mute, notifications, settings
+│   │   ├── api/                    # axios-backed module, Zod-parsed responses
 │   │   ├── components/
 │   │   ├── hooks/
 │   │   ├── store/                  # Zustand slice (UI ephemera only)
-│   │   ├── sync/                   # socket → cache bridge
+│   │   ├── sync/                   # socket → cache bridge (pure mutations + register fn)
+│   │   ├── optimistic/             # pure helpers (messages)
 │   │   ├── types.ts
 │   │   └── index.ts                # public API (cross-feature gateway)
-│   ├── realtime/                   # socket singleton, event bus, sync controller
-│   ├── design-system/              # tokens, theme, primitives, compounds, motion, icons
-│   ├── lib/                        # http, storage, env, format, time
-│   ├── shared/                     # branded IDs, utils (cn), generic hooks, constants
-│   ├── styles/                     # globals.css, tailwind.css, reset.css
-│   └── tests/
+│   ├── realtime/                   # socket singleton, event bus, sync controller, connection banner
+│   ├── design-system/              # tokens, theme, primitives, compounds (incl. ConfirmDialog), motion, icons
+│   ├── lib/
+│   │   ├── http/                   # axios singleton, errors, refresh queue
+│   │   ├── storage/                # memory token, Dexie persistence, localStorage wrapper
+│   │   ├── query/                  # usePersistentQuery
+│   │   ├── data/                   # cross-feature read hooks (useDirectory)
+│   │   ├── notifications/          # permission, sound, favicon (side-effect helpers)
+│   │   ├── offline/                # connectivity, sendQueue, OfflineBanner
+│   │   ├── format/ · time/         # placeholders
+│   │   └── env.ts
+│   ├── shared/
+│   │   ├── types/ids.ts            # branded UserId/ChatId/MessageId/SessionId
+│   │   ├── state/                  # queryKeys, currentUser, settings (+ settings.types)
+│   │   ├── hooks/ · constants/ · utils/cn.ts
+│   ├── styles/                     # tailwind.css, reset.css
+│   └── tests/{mocks,e2e,setup.ts}
 ├── public/                         # theme-bootstrap.js (no-FOUC) + static assets
 ├── .storybook/                     # Storybook 8 config (main.ts, preview.ts)
-├── docs/                           # this directory
+├── docs/                           # this directory + modules/
 ├── tsconfig.json
 ├── vite.config.ts
 ├── vitest.config.ts
@@ -105,40 +124,41 @@ Allowed dependencies:
 
 Violations fail `npm run lint`.
 
-## 6. Application boot sequence (target)
+## 6. Application boot sequence (current)
 
 ```
 index.html
-  └─ <script src="/theme-bootstrap.js">         # syncs data-theme + data-theme-preference before paint (Phase 2)
+  └─ <script src="/theme-bootstrap.js">              # syncs data-theme before paint (CSP-safe static script)
 main.tsx
   └─ <StrictMode>
        └─ <App>
+            ├─ ensureFeatureSyncRegistered()         # registers chats/messages/sessions/assignments/admin/feedback sync handlers (idempotent)
+            ├─ bindConnectivityListeners()           # window 'online' / 'offline' → useConnectivityStore + sendQueue flush
             └─ <AppErrorBoundary>
-                 └─ <AppProviders>
-                      ├─ <QueryProvider>       # TanStack Query client placeholder (Phase 6)
-                      ├─ <ThemeProvider>       # ✅ Phase 2 — applies data-theme, listens to OS color scheme
-                      ├─ <AuthProvider>        # ✅ Phase 3 — registers refresh handler, runs silent refresh on mount, emits auth:ready / auth:logged-out
-                      ├─ <SocketProvider>      # opens socket AFTER auth:ready (Phase 5)
-                      ├─ <SyncController>      # registers per-feature sync handlers (Phase 5)
-                      └─ <ToastProvider>       # ✅ Phase 2 — Radix Toast viewport + useToast() context
-                           └─ <BootGate> | <Styleguide>   # `/__styleguide` dev path renders the styleguide; Phase 4 swaps in <AppRouter>
+                 └─ <AppProviders>                   # QueryProvider → ThemeProvider → AuthProvider → SocketProvider → SyncController → ToastProvider → NotificationController
+                      └─ <AppRouter />               # React Router 7 data router; admin routes lazy-loaded
+                         OR <Styleguide />           # /__styleguide dev-only path check
 ```
 
-The socket lives above the router intentionally — route changes must never close the connection.
+Provider order (outermost → innermost): `QueryProvider`, `ThemeProvider`, `AuthProvider`, `SocketProvider`, `SyncController`, `ToastProvider`, `NotificationController`. Socket + SyncController + NotificationController all sit ABOVE the router so route changes never tear down connections or notification gating.
 
-## 7. State management model (target)
+## 7. State management model (current)
 
 Three strict layers:
 
-1. **Server state** — TanStack Query cache. Keyed by branded IDs. Mutated by HTTP responses and socket events ONLY. Sync handlers use `setQueryData`; never `invalidateQueries`/refetch.
-2. **UI state** — Zustand. Per-feature slices. Holds ephemera like active chat ID, composer drafts, filter state. Never round-trips to the server.
-3. **Persistent state** — IndexedDB (Dexie). Hydration writes seed data into the query cache on boot for instant paint. Network response is canonical and overwrites.
+1. **Server state** — TanStack Query v5. Central `keys` factory in [`shared/state/queryKeys.ts`](../src/shared/state/queryKeys.ts). All keys `as const` tuples typed via branded IDs. Mutated by HTTP responses and socket events ONLY — sync handlers use `setQueryData`; never `invalidateQueries`/refetch (except cross-cache fan-out like assignments after `chat:assigned`).
+2. **UI state** — Zustand. Per-feature slices (chats UI store, messages UI store) + cross-feature slices in `shared/state/` (`currentUser`, `settings`). Never round-trips to the server.
+3. **Persistent state** — Dexie/IndexedDB via [`lib/storage/persistence.service.ts`](../src/lib/storage/persistence.service.ts). `snapshots(&key, updatedAt)` for normalized DTOs, `mediaBlobs` table w/ 200 MB LRU eviction. Reads pass through Zod; drift drops the row. `usePersistentQuery` wrapper seeds cache on mount and writes results back debounced (500 ms). `clearAllPersistedData()` wired to logout (manual + refresh-failure paths).
 
-## 8. Real-time contract (target)
+Cross-feature reads: features that need data owned by another feature use a `lib/data/` or `shared/state/` reader (e.g. `useDirectory` for the admin user list consumed by AssignmentsPanel) — boundaries plugin forbids direct feature→feature imports outside `index.ts`.
 
-Single Socket.IO connection per session, constructed once as a module-level singleton, wrapped in a React context. Opened after `auth:ready` event on the bus; closed on `auth:logged-out`. Reconnect uses exponential backoff capped at 30 s, surfaces "Reconnecting…" banner. On reconnect, missed events are reconciled via `GET /api/sync?since=<seq>`.
+## 8. Real-time contract (current)
 
-Every event payload (in and out) is validated through Zod schemas mirrored from the backend.
+Single Socket.IO connection per session, constructed once as module-level singleton in [`realtime/socket.ts`](../src/realtime/socket.ts) (`getSocket()` ??= pattern, `transports: ['websocket']`, `autoConnect: false`, `withCredentials: true`, auth callback reads in-memory token). `SocketProvider` lives in `AppProviders` ABOVE `<AppRouter />`; listens on `eventBus` `auth:ready` to open and `auth:logged-out` to close. Manager reconnect emits `sync:resume`. Reconnect backoff capped at 30 s; `connectionStatusStore` drives `ConnectionBanner`.
+
+`SyncController` mounts above the router; on socket-ready it invokes every registered handler (`registerSyncHandler`). Handlers registered at boot via `ensureFeatureSyncRegistered()` in [`app/sync/featureSync.ts`](../src/app/sync/featureSync.ts).
+
+Event contract mirrors backend in [`realtime/events.contract.ts`](../src/realtime/events.contract.ts) — every event payload (inbound and outbound) validated through Zod. Currently shipping: `ping`/`pong`, `chats:join`/`chats:leave`, `message:new`/`message:ack`/`message:edited`/`message:deleted`/`message:reaction`, `chat:assigned`/`chat:unassigned`/`chat:read`/`chat:muted`, `session:status`, `user:updated`, `feedback:new`, `error:invalid_payload`. `GET /api/sync?since=<seq>` resume hook deferred (eventBus signal in place; endpoint TBD).
 
 ## 9. Security baseline
 
@@ -182,13 +202,13 @@ Backend invariants the frontend depends on:
 | **1** | Foundation: project scaffold, providers shell, typing, env | ✅ Done |
 | **2** | Design system | ✅ Done |
 | **3** | HTTP + auth | ✅ Done |
-| **4** | Routing + guards | ⏳ Pending |
-| **5** | Real-time core | ⏳ Pending |
-| **6** | State foundation | ⏳ Pending |
-| **7** | Chats feature | ⏳ Pending |
-| **8** | Messages feature | ⏳ Pending |
-| **9** | Admin features | ⏳ Pending |
-| **10** | Notifications, a11y, offline | ⏳ Pending |
+| **4** | Routing + guards | ✅ Done |
+| **5** | Real-time core | ✅ Done |
+| **6** | State foundation (TanStack Query + Dexie) | ✅ Done |
+| **7** | Chats feature | ✅ Done |
+| **8** | Messages feature | ✅ Done (core; media + mention/forward UI deferred) |
+| **9** | Admin features | ✅ Done |
+| **10** | Notifications, settings, offline queue | ✅ Done (per-route axe sweep deferred) |
 | **11** | Observability, perf, hardening | ⏳ Pending |
 | **12** | Testing, CI/CD, deployment | ⏳ Pending |
 
@@ -196,9 +216,26 @@ Detailed plan for every phase: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../FRONTEN
 Architectural reference: [`FRONTEND_ARCHITECTURE.md`](../../FRONTEND_ARCHITECTURE.md).
 Feature catalog: [`FRONTEND_FEATURES_OVERVIEW.md`](../../FRONTEND_FEATURES_OVERVIEW.md).
 
-## 11. Current build state (after Phase 3)
+## 11. Current build state (after Phase 10)
 
-What exists and runs today:
+### Snapshot
+
+- **Tests:** 171 pass / 44 files. `npm run test` green.
+- **Lint + typecheck:** clean (`npm run lint`, `npm run typecheck`).
+- **Bundle:** entry 908.04 KB raw / 281.64 KB gz; admin chunk 23.91 KB raw / 6.28 KB gz. Initial-JS budget (250 KB gz) not yet enforced in CI — gate lands Phase 11.
+- **Routes live:** `/login`, `/dashboard`, `/dashboard/:chatId`, `/settings`, `/admin/{sessions,assignments,users,feedback}`, `/__styleguide` (dev only), `*` 404.
+- **Socket:** single connection above the router; opens on `auth:ready`, closes on `auth:logged-out`, manager reconnect emits `sync:resume`.
+
+### What works end-to-end
+
+- Auth: login → silent-refresh → password change → logout. Refresh queue coalesces concurrent 401s. In-memory token only; IndexedDB wiped on logout.
+- Theme: light/dark/high-contrast/system; FOUC-free via `public/theme-bootstrap.js`.
+- Chats: virtualized list (`react-virtuoso`), filter persistence (localStorage), URL ↔ store sync for active chat, IndexedDB hydration via `usePersistentQuery`, sync handlers for `message:new`/`chat:assigned`/`chat:unassigned`/`chat:read`/`chat:muted`.
+- Messages: virtualized reverse list w/ day dividers, RHF-less composer (Enter/Shift+Enter, IME-safe, draft persistence), optimistic send + reconcile by `tempId`, edit/delete/react w/ snapshot rollback. In-chat search highlight (`<mark>`).
+- Admin: SessionsPanel (create/start/stop/delete + QR), AssignmentsPanel (virtualized + optimistic), DeveloperManagementPanel (CRUD + enable/disable), FeedbackPanel (paginated + mark-read), GlobalMuteToggle. Admin chunk code-split.
+- Notifications: pure `shouldNotify` gate; `NotificationController` wires settings + global mute + chat cache + active chat + permission into outputs (desktop / sound / favicon badge). `NotificationPermissionBanner` opt-in flow.
+- Offline: `useConnectivityStore`, `sendQueue` (FIFO, flush on online), `OfflineBanner` in both layouts. `useSendMessage` enqueues + reconciles when offline.
+- Settings: theme select, three notification switches (desktop / sound / favicon badge), language placeholder, password change. Persists to localStorage (Zod-guarded).
 
 ### From Phase 1 (foundation)
 - React 19 + Vite 6 + TS strict project bootstraps to a themed shell.
@@ -250,12 +287,22 @@ What exists and runs today:
   - MSW silent refresh end-to-end: token attach, single-coalesce of parallel 401s, non-401 mapping to `AppApiError`, refresh-failure surfaces original 401 (`lib/http/client.test.ts`).
   - Login form validation, happy-path token store + `onSuccess` callback, `INVALID_CREDENTIALS` field error (`features/auth/components/LoginForm.test.tsx`).
 
-### Known deviations (Phase 3)
-- Initial JS bundle is now 487.11 KB raw / 143.02 KB gzipped — Phase 2's 387 KB plus axios + react-hook-form + zodResolver + mitt. Still over the `FRONTEND_ARCHITECTURE.md §17` target of 250 KB initial JS. Admin/feature code-splitting lands in Phase 4 (router) and Phase 9 (admin chunk); the budget assertion in CI is wired in Phase 11.
-- Login redirect / dashboard route does not exist yet — `LoginForm` accepts an `onSuccess` callback for the eventual router integration in Phase 4.
-- No backend endpoints exist yet — auth code is contract-tested against MSW handlers that mirror the canonical envelope.
+### From Phases 4–10 (summary; module docs for detail)
+
+- **Routing (4)** — React Router 7 data router, typed `routes` table, composable guards (`ProtectedRoute`, `AdminRoute`, `PublicRoute`, `RootRedirect`), admin lazy chunk via `lazyRoutes.ts`, per-route `RouteErrorBoundary`, `useChatIdParam()` Zod-parses URL params into branded `ChatId`. NavLinks use `viewTransition`.
+- **Real-time (5)** — singleton `getSocket()` + `disposeSocket()`; `SocketProvider` lifecycle on `auth:ready`/`auth:logged-out`; `useSocketEvent` typed hook w/ DEV-throwing payload validation; `connectionStatusStore` + `ConnectionBanner`; `SyncController` registry + `registerSyncHandler`.
+- **State foundation (6)** — `QueryProvider` w/ canonical defaults; `keys` factory in `shared/state/queryKeys.ts`; Dexie schema v1 (`snapshots` + `mediaBlobs` 200 MB LRU); `persistence.service` (debounced write, Zod read); `usePersistentQuery` hydrates cache pre-network; logout calls `clearAllPersistedData`.
+- **Chats (7)** — `useInfiniteQuery` keyed by `keys.chats(filters)`, IndexedDB-primed first page; Zustand UI store (filters localStorage-persisted via Zod gate); virtualized `ChatList`; `ChatContextMenu` (Radix dropdown — mark-read, mute); `ChatSearchBar`; sync handlers `setQueryData` for `message:new`/`chat:assigned`/`chat:unassigned`/`chat:read`/`chat:muted`.
+- **Messages (8 core)** — `useInfiniteQuery` w/ reverse virtualization (`react-virtuoso` `followOutput`, day dividers); pure optimistic helpers (`buildPending`/`appendOptimistic`/`reconcileSend`/`markFailed`/`applyAck`/`applyEdit`/`applyDelete`/`applyReaction`/`applyMessageNew`); composer w/ Enter / Shift+Enter / IME-safe `nativeEvent.isComposing` guard + 300 ms debounced draft. Deferred: MentionAutocomplete, ForwardDialog, media UI, `useDecryptMedia`.
+- **Admin (9)** — sessions / assignments / admin (users CRUD) / feedback / mute features; admin chunk code-split; new design-system compound `ConfirmDialog`; cross-feature directory list at `lib/data/useDirectory.ts` (same `keys.users()` cache as admin feature).
+- **Notifications + Offline + Settings (10)** — `shouldNotify` pure gate; `NotificationController` wires settings/mute/cache/active-chat into outputs; `lib/notifications/{permission,sound,favicon}.ts` side-effect helpers; `lib/offline/{connectivity,sendQueue,OfflineBanner}` w/ `useSendMessage` enqueue-on-offline + flush-on-online; `shared/state/settings.ts` Zustand store (Zod localStorage); `SettingsScreen` mounted on `/settings`.
+
+### Known deviations vs. plan
+- Bundle entry 908.04 KB raw / 281.64 KB gz — still over the 250 KB initial-JS budget. CI gate lands Phase 11; manual chunking + per-route lazy splits queued alongside.
+- Backend endpoints for `/api/chats`, `/api/messages`, `/api/assignments`, `/api/users` CRUD, `/api/feedback`, `/api/mute/global` not yet implemented — frontend ships against the documented contract and Zod-fails closed on drift.
 - CSP still allows `style-src 'unsafe-inline'`; tightened in Phase 11 alongside SHA-pinning for the theme bootstrap.
-- Chromatic visual regression / per-story axe sweep deferred to Phase 12.
+- Per-route axe sweep, Chromatic visual regression, Playwright E2E suite — all queued for Phase 12.
+- `GET /api/sync?since=<seq>` resume endpoint not yet implemented; `sync:resume` eventBus hook is wired.
 
 Module-level detail for the built pieces lives in [`modules/`](modules/).
 

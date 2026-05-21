@@ -2,7 +2,7 @@
 
 > The boot orchestration layer. Owns the React tree's root, the providers composition, the top-level error boundary, the loading gate, and the dev-only styleguide screen.
 
-**Status:** Phase 3 — `ThemeProvider`, `ToastProvider`, and now `AuthProvider` are real. The remaining three root providers stay transparent passthroughs until their respective phases. A dev-only `/__styleguide` path renders the design-system surface. Full routing arrives in Phase 4.
+**Status:** Through Phase 10 — every provider is real. `AppRouter` mounts the full route table; admin chunk lazy-loaded. `NotificationController` sits inside the provider tree, ABOVE the router. `bindConnectivityListeners()` + `ensureFeatureSyncRegistered()` run at module-load time inside `App.tsx`. `/__styleguide` dev-only path still renders the design-system surface.
 
 ---
 
@@ -89,26 +89,26 @@ Gating:
 
 It uses a path string check, not React Router, because the router lands in Phase 4. When the router arrives, the styleguide will move into the route table behind the same dev guard.
 
-## React tree (current state, Phase 3)
+## React tree (current state, post Phase 10)
 
 ```
 <head>
-  <script src="/theme-bootstrap.js" />   // sets data-theme + data-theme-preference synchronously
+  <script src="/theme-bootstrap.js" />   // sets data-theme synchronously
 #root
 └─ <StrictMode>
-   └─ <App>
+   └─ <App>                              // also runs ensureFeatureSyncRegistered() + bindConnectivityListeners() at module load
       └─ <AppErrorBoundary>
          └─ <AppProviders>
-            ├─ <QueryProvider>           // placeholder
-            ├─ <ThemeProvider>           // ✅ Phase 2
-            │   ├─ <AuthProvider>        // ✅ Phase 3 (from @/features/auth)
-            │   │   ├─ <SocketProvider>  // placeholder
-            │   │   │   ├─ <SyncController>  // placeholder
-            │   │   │   │   └─ <ToastProvider>  // ✅ Phase 2 (Radix Toast viewport)
-            │   │   │   │       └─ <BootGate>  |  <Styleguide>  // dev path branch
+            └─ <QueryProvider>           // ✅ Phase 6 (TanStack Query v5)
+               └─ <ThemeProvider>        // ✅ Phase 2
+                  └─ <AuthProvider>      // ✅ Phase 3
+                     └─ <SocketProvider> // ✅ Phase 5 (auth-gated open)
+                        └─ <SyncController>     // ✅ Phase 5 (registry registers chats/messages/sessions/assignments/admin/feedback)
+                           └─ <ToastProvider>   // ✅ Phase 2
+                              └─ <NotificationController>   // ✅ Phase 10 (subscribes to message:received)
+                                 └─ <AppRouter />            // ✅ Phase 4
+                                    OR <Styleguide />        // dev-only path check
 ```
-
-After all phases land, the inner content becomes `<AppRouter>` with active routes.
 
 ## Conventions
 
@@ -144,7 +144,7 @@ When replacing a placeholder provider with a real implementation in a later phas
 
 - `main.tsx` is the entry — Vite's `index.html` points at it. `index.html` also loads `/theme-bootstrap.js` before the module script.
 - `App.tsx` is imported only by `main.tsx`.
-- `AppProviders` imports `ThemeProvider` and `ToastProvider` from `@/design-system`, and `AuthProvider` from `@/features/auth` (Phase 3). The remaining provider placeholders, error boundary, BootGate, and Styleguide are only imported by `App.tsx`. Later phases may import `BootGate` from `<Suspense>` fallbacks in `app/router/`.
+- `AppProviders` imports `ThemeProvider`/`ToastProvider` from `@/design-system`, `AuthProvider` from `@/features/auth`, `SocketProvider`/`SyncController` from `@/realtime`, `QueryProvider` from `@/app/providers/QueryProvider`, and `NotificationController` from `@/app/notifications/NotificationController`. `<BootGate>` is reused as the `<Suspense>` fallback for the lazy admin chunk in `app/router/AppRouter.tsx`. `App.tsx` also calls `ensureFeatureSyncRegistered()` (`@/app/sync/featureSync`) and `bindConnectivityListeners()` (`@/lib/offline/connectivity`) at module load.
 
 ## References
 

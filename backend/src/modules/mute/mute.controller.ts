@@ -53,6 +53,12 @@ export class MuteController {
     return { chatIds: [...muted], globalEnabled: global };
   }
 
+  @Get('global')
+  async getGlobal(@CurrentUser() current: AuthenticatedRequestUser): Promise<{ enabled: boolean }> {
+    const enabled = await this.service.isGlobalMuted(current.id);
+    return { enabled };
+  }
+
   private async resolve(current: AuthenticatedRequestUser): Promise<UserDomain> {
     const user = await this.users.findById(UserId(current.id));
     if (user === null) throw new NotFoundError('user');

@@ -54,4 +54,8 @@ export type AuditEvent =
   | 'assignment.create'
   | 'assignment.remove'
   | 'mute.chat.set'
-  | 'mute.global.set';
+  | 'mute.global.set'
+  | 'session.create'
+  | 'session.start'
+  | 'session.stop'
+  | 'session.delete';

@@ -17,8 +17,16 @@ import { ZodValidationPipe } from '@app/common/pipes/zod-validation.pipe';
 import { CurrentUser } from '@app/common/decorators/current-user.decorator';
 import { Public } from '@app/common/decorators/public.decorator';
 import { JwtAuthGuard } from '@app/common/guards/jwt-auth.guard';
+import { RateLimit } from '@app/common/rate-limit';
 import { UserId } from '@app/shared/types/ids';
 import { AuthService, type RefreshContext } from './auth.service';
+
+function extractLoginEmail(req: Request): string | null {
+  const body = (req.body ?? {}) as { email?: unknown };
+  if (typeof body.email !== 'string') return null;
+  const trimmed = body.email.trim().toLowerCase();
+  return trimmed === '' ? null : trimmed;
+}
 
 function buildContext(req: Request): RefreshContext {
   const ctx: RefreshContext = {};
@@ -65,6 +73,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @RateLimit({ preset: 'auth', mode: 'hard', identify: extractLoginEmail })
   async login(
     @Body(new ZodValidationPipe(LoginSchema)) body: LoginInput,
     @Req() req: Request,

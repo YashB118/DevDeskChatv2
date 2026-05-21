@@ -51,6 +51,7 @@ The function inspects `__filename` at runtime to decide whether to load `*.ts` (
 - Built via `TypeOrmModule.forRootAsync({ inject: [APP_CONFIG], useFactory: (env) => buildDataSourceOptions(env) })`.
 - TypeORM connects during Nest's bootstrap pass. A connection failure throws out of the factory, aborting startup before HTTP listens (this is desired — the orchestrator restarts the pod).
 - Connection close is handled by Nest's TypeORM lifecycle when `app.enableShutdownHooks()` runs `onApplicationShutdown` on the underlying provider — no extra wiring needed here.
+- Phase 10: `PostgresPoolCollector` (see [observability.md](observability.md)) ticks every 5s, reads `dataSource.driver.master` as a `pg.Pool`, and writes `postgres_pool_active_connections` / `postgres_pool_idle_connections` / `postgres_pool_waiting_clients`. The collector lives in `shared/observability/` to keep `infra/db/` free of metrics dependencies; it injects the `DataSource` via `@InjectDataSource()`.
 
 ## 4. `SnakeNamingStrategy` (`naming.ts`)
 

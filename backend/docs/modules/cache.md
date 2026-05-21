@@ -57,6 +57,7 @@ Typed cache with three primitive ops and one composite:
 ### `wrap<T>(key, loader, opts): Promise<T>`
 
 - Reads with `get(key, opts.schema)`. Cache hit → return.
+- Phase 10: every call increments `cache_lookups_total{namespace, outcome}` where `namespace` is the first colon-segment of the key (`chats:list:<id>` → `chats`) and `outcome` is `hit` or `miss`. Keep that segment stable so the Prom labels stay bounded.
 - Miss → acquire `lock:<key>` via `DistributedLockService.acquire({ ttlMs: opts.lockTtlMs ?? 5000, retries: opts.lockRetries ?? 20, retryDelayMs: opts.lockRetryDelayMs ?? 50 })`.
 - If the lock cannot be acquired within the retry budget → log a warning and call `loader()` *without* exclusivity (degraded mode — better to serve the request than to fail it).
 - With the lock held: re-check the cache, then call `loader()`, then `set(key, value, opts.ttlSeconds)` before releasing the lock. The re-check protects against the (legitimate) winner having populated the cache while we waited.

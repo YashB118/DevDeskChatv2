@@ -24,3 +24,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # Phase 11: dependency hygiene.
+      # `audit-level=critical` is the hard gate — anything CRITICAL fails the
+      # build. The advisory step right below logs high+moderate findings
+      # without blocking (the NestJS 10 line ships transitive `multer` highs
+      # that only unwind on a NestJS 11 bump tracked separately).
+      - name: npm audit — runtime deps (CRITICAL gate)
+        run: npm audit --omit=dev --audit-level=critical
+      - name: npm audit — runtime deps (advisory, high+)
+        run: npm audit --omit=dev --audit-level=high || true

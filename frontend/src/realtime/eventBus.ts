@@ -4,6 +4,7 @@ import type {
   SessionStatusPayload,
   UserUpdatedPayload,
   FeedbackNewPayload,
+  MessageNewPayload,
 } from './events.contract';
 
 export interface AuthReadyPayload {
@@ -34,6 +35,7 @@ export type AppEvents = {
   'sessions:status': SessionStatusPayload;
   'users:updated': UserUpdatedPayload;
   'feedback:new': FeedbackNewPayload;
+  'message:received': MessageNewPayload;
 };
 
 export const eventBus: Emitter<AppEvents> = mitt<AppEvents>();

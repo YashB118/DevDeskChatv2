@@ -170,6 +170,16 @@ frontend/
 │   │   │   └── persistence.service.ts # readSnapshot/writeSnapshot/clearAll + mediaBlobs LRU
 │   │   ├── query/
 │   │   │   └── usePersistentQuery.ts  # useQuery wrapper: IndexedDB hydrate + writeback
+│   │   ├── data/
+│   │   │   └── useDirectory.ts        # /api/users read keyed by keys.users() (cross-feature consumer)
+│   │   ├── notifications/
+│   │   │   ├── permission.ts          # getNotificationPermission / showDesktopNotification
+│   │   │   ├── sound.ts               # preloaded Audio
+│   │   │   └── favicon.ts             # canvas unread badge (throttled)
+│   │   ├── offline/
+│   │   │   ├── connectivity.ts        # Zustand store + subscribeConnectivity + bindConnectivityListeners
+│   │   │   ├── sendQueue.ts           # FIFO + flush on online
+│   │   │   └── OfflineBanner.tsx      # status-aware banner
 │   │   ├── time/                      # (placeholder)
 │   │   ├── format/                    # (placeholder)
 │   │   └── env.ts                     # Zod-parsed VITE_* env
@@ -179,7 +189,9 @@ frontend/
 │   │   │   └── ids.ts                 # Branded ID types
 │   │   ├── state/
 │   │   │   ├── queryKeys.ts           # Central as-const query key factory
-│   │   │   └── currentUser.ts         # Cross-feature {id, displayName} accessor
+│   │   │   ├── currentUser.ts         # Cross-feature {id, displayName} accessor
+│   │   │   ├── settings.ts            # User preferences (notifications, language) — Zustand + Zod localStorage
+│   │   │   └── settings.types.ts
 │   │   ├── hooks/
 │   │   ├── utils/
 │   │   └── constants/
@@ -246,7 +258,7 @@ The boot order is fixed. Every component subscribes downstream of guarantees mad
 - A local `'io client disconnect'` (provider teardown, logout) does NOT flip status to reconnecting.
 - The "Reconnecting…" indicator is rendered by [`ConnectionBanner`](#) reading from a Zustand store (`idle | connecting | connected | reconnecting | offline`).
 - On successful manager reconnect, the provider emits `sync:resume` on the event bus.
-- **Sequence resume (`GET /api/sync?since=<seq>`)** — the event bus signal is in place; the resume endpoint is deferred to Phase 10 alongside the backend support.
+- **Sequence resume (`GET /api/sync?since=<seq>`)** — the event bus signal is in place; the resume endpoint is deferred (frontend hook is ready, awaits backend implementation).
 
 ---
 
@@ -736,18 +748,18 @@ The app is not a strict offline app — it cannot send messages without a connec
 |---|---|---|
 | Cold start, recently online | ✅ | Hydrate from IndexedDB snapshot via `usePersistentQuery` for instant UI, then reconcile from network |
 | Mid-session disconnect | ✅ | `ConnectionBanner` shows "Reconnecting…"; UI remains interactive |
-| Long disconnect — sequence resume | ⏳ Phase 10 | `sync:resume` event hook is wired; `GET /api/sync?since=<seq>` endpoint TBD |
+| Long disconnect — sequence resume | ⏳ | `sync:resume` event hook is wired (emitted on manager reconnect); `GET /api/sync?since=<seq>` endpoint TBD on backend |
 | Failed send | ✅ | Bubble status flips to `failed`; "Failed — retry" affordance present |
 | Stale media | ⏳ | Dexie `mediaBlobs` LRU is in place; `useDecryptMedia` hook not yet implemented |
-| Queued sends while `navigator.onLine === false` | ⏳ Phase 10 | Offline queue + retry on `online` |
+| Queued sends while `navigator.onLine === false` | ✅ Phase 10 | [lib/offline/sendQueue.ts](frontend/src/lib/offline/sendQueue.ts) holds tasks; `subscribeConnectivity` flushes on `online`. [useSendMessage](frontend/src/features/messages/hooks/useMessageMutations.ts) branches on connectivity and reconciles after flush. |
 
 A service worker for asset caching is queued for Phase 12; today the app does not register one.
 
 ---
 
-## 12. Notifications ⏳ Phase 10
+## 12. Notifications ✅ Phase 10
 
-`features/notifications/` is a stub today. The target shape — `NotificationService` listening on the event bus, gated by chat-mute / active-chat / focus / global-sound / permission — is unchanged from the original spec below. Implementation lands in Phase 10 alongside the settings screen and favicon badge.
+Shipped. [features/notifications/notification.service.ts](frontend/src/features/notifications/notification.service.ts) exports a pure `shouldNotify(payload, gates)` gate (every branch unit-tested) and `createNotificationService(gates, outputs)` which subscribes to `eventBus.on('message:received')`. [chats.sync.ts](frontend/src/features/chats/sync/chats.sync.ts) emits `message:received` for non-self `message:new` events. [NotificationController](frontend/src/app/notifications/NotificationController.tsx) wires settings + global mute + chat-cache lookups + active-chat store into the gates, and outputs to [lib/notifications/permission.ts](frontend/src/lib/notifications/permission.ts), [sound.ts](frontend/src/lib/notifications/sound.ts), [favicon.ts](frontend/src/lib/notifications/favicon.ts). Permission banner only appears when desktop notifications are opted-in AND permission is `'default'`.
 
 ```ts
 class NotificationService {
@@ -790,9 +802,9 @@ Today the app ships an `AppErrorBoundary` + per-route `RouteErrorBoundary` and a
 | Integration | Vitest + MSW | ✅ | Refresh queue, login flow, optimistic mutations, composer submit |
 | Visual | Storybook + Chromatic | 🟡 | Storybook present; Chromatic wiring in Phase 12 |
 | E2E | Playwright | ⏳ | Phase 12 — golden-path flows |
-| Accessibility | `vitest-axe` + Storybook a11y | ✅ | Primitives + compounds covered; full per-route sweep in Phase 10 |
+| Accessibility | `vitest-axe` + Storybook a11y | 🟡 | Primitives + compounds covered; full per-route sweep + Chromatic in Phase 12 |
 
-Today: **152 tests pass across 40 files**. Coverage thresholds (line/branch — 75% for `features/*`, 90% for `realtime/*` and `lib/*`) are not yet gated in CI; the gate lands in Phase 12. Coverage is a floor; meaningful assertions are the actual bar.
+Today: **171 tests pass across 44 files**. Coverage thresholds (line/branch — 75% for `features/*`, 90% for `realtime/*` and `lib/*`) are not yet gated in CI; the gate lands in Phase 12. Coverage is a floor; meaningful assertions are the actual bar.
 
 ---
 
@@ -866,7 +878,7 @@ A quick tour of how the principles compose in each feature.
 
 - User CRUD via `useUsers` + `useUserActions` against `/api/users`; `user:updated` socket events flip cached `disabled`/`role` without refetching.
 - Feedback inbox via cursor-paginated `useFeedback`; `feedback:new` socket events refetch the latest item (`limit=1`) to materialize the body while keeping the rest of the cache untouched.
-- Global mute is a single Boolean against `/api/mute/global`, optimistic with rollback. The notification service that consumes it lands in Phase 10.
+- Global mute is a single Boolean against `/api/mute/global`, optimistic with rollback. Consumed by the notification service (Phase 10) — `NotificationController` reads `useGlobalMute().data?.muted` to suppress every notification when on.
 
 ### 16.5 Notifications
 

@@ -1,8 +1,8 @@
 # Module: Realtime Event Bus (`realtime/eventBus`)
 
-> A typed cross-feature pub/sub. First piece of `src/realtime/` to land; the rest of the realtime layer (socket singleton, sync controller, reconnect strategy) follows in Phase 5.
+> A typed cross-feature pub/sub. Documented separately from the rest of `realtime/` ([`realtime.md`](realtime.md)) because every feature touches it.
 
-**Status:** Phase 3 — bus and four canonical events shipped. Additional event names land alongside their producers in Phase 5+ (socket connection state, `sync:resume` triggers, etc.).
+**Status:** Through Phase 10 — bus + nine event names shipped.
 
 ---
 
@@ -22,7 +22,7 @@ Today (Phase 3), the bus's job is auth lifecycle:
 | Path | Role |
 |---|---|
 | `frontend/src/realtime/eventBus.ts` | The single `mitt` emitter, the `AppEvents` map, and per-event payload interfaces. |
-| `frontend/src/realtime/index.ts` | Currently empty (intentional barrel placeholder). Phase 5 will re-export the socket and bus surface here. |
+| `frontend/src/realtime/index.ts` | Re-exports `eventBus`, socket surface, `useSocket`, `useSocketEvent`, `SyncController`, `registerSyncHandler`, `connectionStatusStore`, `ConnectionBanner`, and the contract types. |
 
 ## Event map
 
@@ -32,6 +32,10 @@ type AppEvents = {
   'auth:logged-out': { reason: 'manual' | 'refresh-failed' | 'forced' };
   'sync:resume': { reason?: 'reconnect' | 'manual' };
   'app:error': { message: string; cause?: unknown };
+  'sessions:status': SessionStatusPayload;     // re-fanned from session:status socket event
+  'users:updated': UserUpdatedPayload;
+  'feedback:new': FeedbackNewPayload;
+  'message:received': MessageNewPayload;       // fanned out by chats.sync when !fromSelf — notifications hook
 };
 ```
 
@@ -70,19 +74,20 @@ Events emitted before a handler subscribes are dropped (no replay). The contract
 | Event | Producer | When |
 |---|---|---|
 | `auth:ready` | `features/auth/components/AuthProvider.tsx` (silent refresh success), `features/auth/hooks/useAuth.ts` (login success) | After token + user are in memory; payload carries `toUserId(user.id)`. |
-| `auth:logged-out` | `features/auth/components/AuthProvider.tsx` (refresh failure), `features/auth/hooks/useAuth.ts` (manual logout) | Immediately after the local token + state are cleared. |
-| `sync:resume` | (not yet — Phase 5 reconnect handler) | After a socket reconnect, before per-feature sync handlers re-register. |
-| `app:error` | (not yet — Phase 11 Sentry adapter, or the existing `AppErrorBoundary` `app:error` DOM event may consolidate here) | Unhandled rejection / boundary trip. |
+| `auth:logged-out` | `features/auth/components/AuthProvider.tsx` (refresh failure), `features/auth/hooks/useAuth.ts` (manual logout) | After local token + state cleared. |
+| `sync:resume` | `realtime/SocketContext.tsx` on manager reconnect | After socket reconnects; future per-feature resume hooks fan out from here. |
+| `app:error` | `realtime/useSocketEvent.ts` in prod on Zod failure | Bad inbound payload (instead of throwing). Phase 11 Sentry adapter will subscribe. |
+| `sessions:status` | `features/sessions/sync/sessions.sync.ts` after Zod-validated `session:status` arrives | Fans out so `useSessionQR` knows when to refetch the QR. |
+| `users:updated` · `feedback:new` | Declared payload types — not currently emitted by client code (re-fan via socket sync handlers if needed). | Reserved for future per-feature fan-out. |
+| `message:received` | `features/chats/sync/chats.sync.ts` when `message:new` payload `!fromSelf` | Decouples cache updates from notification logic. |
 
-## Consumers (planned)
+## Consumers (current)
 
-| Phase | Consumer | Event |
-|---|---|---|
-| 5 | `SocketProvider` | `auth:ready` → open connection; `auth:logged-out` → close connection. |
-| 5 | `SyncController` reconnect path | `sync:resume` → call each feature's resume handler. |
-| 5+ | Per-feature sync modules | Optionally subscribe to `auth:logged-out` to clear feature-scoped caches. |
-| 9 | Admin panel layout | `auth:logged-out` → exit any open admin tools. |
-| 11 | Sentry adapter | `app:error` → breadcrumb / report. |
+| Consumer | Event |
+|---|---|
+| `realtime/SocketContext.tsx` | `auth:ready` → open socket; `auth:logged-out` → close socket. |
+| `features/notifications/notification.service.ts` (via `NotificationController`) | `message:received` → run `shouldNotify` gate + outputs. |
+| `features/sessions/hooks/useSessionQR.ts` | `sessions:status` → invalidate the QR query when status flips to `SCAN_QR_CODE`. |
 
 ## Why bus events and not just hooks?
 
@@ -92,25 +97,17 @@ Do not move steady-state checks into the bus. Do not move one-shot transitions i
 
 ## Cross-module wiring
 
-| Outbound (events read by) | Module |
-|---|---|
-| `auth:ready` | (Phase 5) Socket provider |
-| `auth:logged-out` | (Phase 5) Socket provider, (Phase 9) admin layout |
+See producer / consumer tables above for the full picture. Notable cross-feature edges:
 
-| Inbound (events emitted by) | Module |
-|---|---|
-| `auth:ready`, `auth:logged-out` | `features/auth` |
+- `features/auth` emits `auth:ready` / `auth:logged-out`; `realtime/SocketContext` consumes both.
+- `features/chats` re-emits `message:new` as `message:received` for the notifications subsystem.
+- `features/sessions` re-emits `session:status` as `sessions:status` for in-feature consumers (`useSessionQR`).
 
 ## Testing
 
-The bus itself has no dedicated tests in Phase 3 — `mitt` is a tested library, and our wrapper adds only type information. Producer behavior is covered indirectly:
-
-- `LoginForm.test.tsx` succeeds → `useAuth().login` emits `auth:ready` (not asserted, but the test mock-handler chain depends on it for `onSuccess`).
-- `lib/http/client.test.ts` refresh-failure path: the AuthProvider would normally emit `auth:logged-out`; this is exercised end-to-end by manually rejecting the refresh handler.
-
-When Phase 5 lands, add tests that:
-1. Subscribe a spy to `auth:ready` and verify the socket opens.
-2. Emit `auth:logged-out` and verify the socket closes.
+- `SocketContext.test.tsx` exercises producer ↔ consumer end-to-end (`auth:ready` opens socket, `auth:logged-out` closes it, manager reconnect emits `sync:resume`).
+- `notification.service.test.ts` verifies `eventBus.emit('message:received')` triggers gated outputs.
+- The bus itself has no dedicated tests — `mitt` is a tested library; wrapper adds only types.
 
 ## How to extend
 
@@ -125,6 +122,6 @@ When Phase 5 lands, add tests that:
 ## References
 
 - Architecture: [`FRONTEND_ARCHITECTURE.md`](../../../FRONTEND_ARCHITECTURE.md) §6.5 (event bus), §4 (boot sequence — the `auth:ready` gate).
-- Implementation plan: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../../FRONTEND_IMPLEMENTATION_PLAN.md) Phase 3 (current), Phase 5 (full realtime).
-- Auth feature: [`auth.md`](auth.md).
+- Implementation plan: [`FRONTEND_IMPLEMENTATION_PLAN.md`](../../../FRONTEND_IMPLEMENTATION_PLAN.md) Phase 3 (auth events), Phase 5 (socket lifecycle + `sync:resume`), Phase 10 (`message:received` for notifications).
+- Auth feature: [`auth.md`](auth.md). Realtime: [`realtime.md`](realtime.md). Notifications: [`notifications.md`](notifications.md).
 - Master context: [`../context.md`](../context.md).

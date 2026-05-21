@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { keys } from '@/shared/state/queryKeys';
 import { useCurrentUserId } from '@/shared/state/currentUser';
 import type { ChatId, MessageId } from '@/shared/types/ids';
+import { useConnectivityStore } from '@/lib/offline/connectivity';
+import { enqueueSend } from '@/lib/offline/sendQueue';
 import { messagesApi } from '../api/messages.api';
 import {
   appendOptimistic,
@@ -52,9 +54,24 @@ export function useSendMessage(chatId: ChatId): UseSendMessageReturn {
   const send = useCallback(
     async (input: SendMessageInput) => {
       const tempId = makeTempId();
+      if (!useConnectivityStore.getState().online) {
+        if (userId) {
+          const optimistic = buildPending(chatId, userId, input, tempId);
+          qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
+            appendOptimistic(data, optimistic),
+          );
+        }
+        enqueueSend(async () => {
+          const server = await messagesApi.send(chatId, input, tempId);
+          qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
+            reconcileSend(data, tempId, server),
+          );
+        });
+        return;
+      }
       await mutation.mutateAsync({ input, tempId });
     },
-    [mutation],
+    [mutation, chatId, qc, userId],
   );
 
   return { send, isSending: mutation.isPending };

@@ -1,14 +1,33 @@
 import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { type Request } from 'express';
 import { JwtAuthGuard } from '@app/common/guards/jwt-auth.guard';
 import { CurrentUser } from '@app/common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '@app/common/pipes/zod-validation.pipe';
+import { RateLimit } from '@app/common/rate-limit';
 import { type UserDomain } from '@app/modules/users/user.types';
 import { type AuthenticatedRequestUser } from '@app/modules/auth/auth.types';
 import { UserRepository } from '@app/modules/users/user.repository';
 import { UserId } from '@app/shared/types/ids';
 import { NotFoundError } from '@app/shared/errors';
 import { ListChatsQuerySchema, type ListChatsQuery } from './chat.schema';
-import { ChatsService, type EnrichedChat } from './chats.service';
+import {
+  CachedChatListSchema,
+  ChatsService,
+  chatsListCacheKey,
+  type EnrichedChat,
+} from './chats.service';
+
+function softChatsKey(req: Request): string | null {
+  const user = (req as Request & { user?: AuthenticatedRequestUser }).user;
+  if (user === undefined) return null;
+  const q = req.query as Record<string, string | undefined>;
+  const session = q.session;
+  if (session === undefined || session === '') return null;
+  const limit = Number.parseInt(q.limit ?? '50', 10);
+  const offset = Number.parseInt(q.offset ?? '0', 10);
+  if (!Number.isFinite(limit) || !Number.isFinite(offset)) return null;
+  return chatsListCacheKey(user.id, session, limit, offset);
+}
 
 @Controller('chats')
 @UseGuards(JwtAuthGuard)
@@ -19,6 +38,16 @@ export class ChatsController {
   ) {}
 
   @Get()
+  @RateLimit({
+    preset: 'chats',
+    mode: 'soft',
+    identify: (req) => (req as Request & { user?: AuthenticatedRequestUser }).user?.id ?? null,
+    softCache: {
+      key: softChatsKey,
+      schema: CachedChatListSchema,
+      wrap: (cached): { chats: unknown } => ({ chats: cached }),
+    },
+  })
   async list(
     @CurrentUser() current: AuthenticatedRequestUser,
     @Query(new ZodValidationPipe(ListChatsQuerySchema)) query: ListChatsQuery,

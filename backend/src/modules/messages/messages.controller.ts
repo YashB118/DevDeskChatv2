@@ -13,6 +13,20 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '@app/common/guards/jwt-auth.guard';
 import { ZodValidationPipe } from '@app/common/pipes/zod-validation.pipe';
+import { RateLimit } from '@app/common/rate-limit';
+import { type Request } from 'express';
+import { type AuthenticatedRequestUser } from '@app/modules/auth/auth.types';
+
+function userIdFromReq(req: Request): string | null {
+  const u = (req as Request & { user?: AuthenticatedRequestUser }).user;
+  return u?.id ?? null;
+}
+
+const sendDescriptor = {
+  preset: 'send' as const,
+  mode: 'hard' as const,
+  identify: userIdFromReq,
+};
 import {
   DeleteMessageSchema,
   EditMessageSchema,
@@ -99,6 +113,7 @@ export class MessagesController {
 
   @Post(':chatId/send')
   @HttpCode(HttpStatus.CREATED)
+  @RateLimit(sendDescriptor)
   async sendText(
     @Param('chatId') chatId: string,
     @Body(new ZodValidationPipe(SendTextSchema)) body: SendTextInput,
@@ -108,6 +123,7 @@ export class MessagesController {
 
   @Post(':chatId/media')
   @HttpCode(HttpStatus.CREATED)
+  @RateLimit(sendDescriptor)
   async sendMedia(
     @Param('chatId') chatId: string,
     @Body(new ZodValidationPipe(SendMediaSchema)) body: SendMediaInput,
@@ -146,6 +162,7 @@ export class MessagesController {
 
   @Post(':chatId/:stanzaId/forward')
   @HttpCode(HttpStatus.CREATED)
+  @RateLimit(sendDescriptor)
   async forward(
     @Param('chatId') chatId: string,
     @Param('stanzaId') stanzaId: string,

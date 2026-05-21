@@ -2,7 +2,7 @@
 
 > The build, lint, type, test, and CI configuration. Not a feature module — described here so an AI editing config can understand the constraints these tools enforce on the rest of the codebase.
 
-**Status:** Phase 3 — toolchain adds runtime deps for the HTTP + auth layer (axios, react-hook-form, `@hookform/resolvers`, mitt) and the MSW node server for integration tests. Remaining toolchain work: Chromatic + Playwright + Lighthouse (Phase 12), bundle-budget plugin (Phase 11).
+**Status:** Through Phase 10 — runtime deps now include axios, react-hook-form, `@hookform/resolvers`, mitt, react-router-dom@7, @tanstack/react-query@5, zustand, dexie, react-virtuoso, framer-motion. Test toolchain adds `fake-indexeddb` + MSW. Remaining toolchain work: Chromatic + Playwright + Lighthouse + Docker/nginx (Phase 12), bundle-budget plugin + Sentry + Web Vitals beacons (Phase 11).
 
 ---
 
@@ -92,7 +92,7 @@ The ignore list explicitly excludes `dist`, `node_modules`, `coverage`, `.husky`
 
 A bundle-budget plugin is referenced in Phase 1's plan but actually wired in Phase 11.
 
-Current production bundle (post Phase 3): 487.11 KB JS / 143.02 KB gzipped — Phase 2's 387 KB plus axios + react-hook-form + zodResolver + mitt. Above the 250 KB target. Pulled under budget once admin code-splitting (Phase 4 router + Phase 9 admin chunk) lands.
+Current production bundle (post Phase 10): entry 908.04 KB JS / 281.64 KB gzipped — still over the 250 KB initial-JS target from `FRONTEND_ARCHITECTURE.md §17`. Admin chunk code-split at 23.91 KB raw / 6.28 KB gz (well under the 120 KB per-route budget). CI bundle-budget gate lands in Phase 11; manual chunking + per-route lazy splits queued alongside.
 
 ## Vitest configuration
 
@@ -152,7 +152,7 @@ The Husky pre-commit hook file is not committed yet. To enable hooks locally, ru
 
 ## Known deviations from the architecture doc
 
-- **Bundle size**: Phase 1 floor was ~61 KB gzipped; post Phase 3 the production bundle is 487.11 KB raw / 143.02 KB gzipped — over the 250 KB initial-JS target from `FRONTEND_ARCHITECTURE.md §17`. Driven by Radix primitives, Framer Motion, `lucide-react`, and the Phase 3 HTTP/auth stack (axios, react-hook-form, zodResolver, mitt). Code-splitting in Phase 4 (router) and Phase 9 (admin chunk) pulls this under budget; budget assertion lands in Phase 11.
+- **Bundle size**: Phase 1 floor was ~61 KB gzipped; post Phase 10 the production entry is 908.04 KB raw / 281.64 KB gzipped — still over the 250 KB initial-JS target. Admin chunk code-split (Phase 4 router + Phase 9 admin code) ships at 23.91 KB raw / 6.28 KB gz separately. Driven by Radix primitives, Framer Motion, `lucide-react`, react-virtuoso, TanStack Query v5, Dexie, axios, react-hook-form, mitt, zustand. Manual chunking + per-route lazy splits + CI bundle-budget assertion land in Phase 11.
 - **`eslint.config.ts` (TS) vs `eslint.config.js` (JS)**: Plan suggested a TS config file. We ship `.js` to avoid the jiti/native-TS loader friction in ESLint 9. Functionality is identical.
 - **Bundle-budget Vite plugin**: Referenced in Phase 1 plan, actually implemented in Phase 11.
 - **Husky pre-commit hook**: Config in `package.json` but the hook file is not committed; contributors enable it locally.

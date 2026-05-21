@@ -2,7 +2,7 @@
 
 > Compile-time-distinct string types for every domain identifier in the app, plus parser/constructor functions that validate format at runtime boundaries. Prevents whole classes of bugs where one ID accidentally flows into another's slot.
 
-**Status:** Phase 1 — covers the four identifier kinds used across features through Phase 9.
+**Status:** Phase 1 — covers the four identifier kinds used across every shipped feature. `useChatIdParam()` (Phase 4), `keys` factory (Phase 6), `events.contract.ts` (Phase 5+) all consume these.
 
 ---
 

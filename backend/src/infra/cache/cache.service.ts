@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { type ZodSchema } from 'zod';
+import { cacheLookupsTotal, METRIC_OUTCOME } from '@app/shared/observability/metrics.registry';
 import { REDIS_CLIENT } from './constants';
 import { type RedisClient } from './redis.provider';
 import { DistributedLockService } from './distributed-lock.service';
@@ -36,8 +37,13 @@ export class CacheService {
   }
 
   async wrap<T>(key: string, loader: () => Promise<T>, opts: WrapOptions<T>): Promise<T> {
+    const namespace = key.split(':')[0] ?? 'unknown';
     const cached = await this.get(key, opts.schema);
-    if (cached !== null) return cached;
+    if (cached !== null) {
+      cacheLookupsTotal.inc({ namespace, outcome: METRIC_OUTCOME.CACHE_HIT });
+      return cached;
+    }
+    cacheLookupsTotal.inc({ namespace, outcome: METRIC_OUTCOME.CACHE_MISS });
 
     const lockKey = `lock:${key}`;
     const lockTtlMs = opts.lockTtlMs ?? 5_000;

@@ -12,6 +12,7 @@
 - `src/shared/types/ids.ts`
 - `src/shared/types/express.d.ts`
 - `src/shared/utils/result.ts`
+- `src/shared/observability/` (Phase 10) — Nest-aware but isolated to one folder: `metrics.module.ts`, `metrics.controller.ts`, `metrics.interceptor.ts`, `metrics.registry.ts`, `postgres-pool.collector.ts`, `trace-method.decorator.ts`. See [observability.md](observability.md) for the surface; the `shared/` rule about "no Nest imports" is intentionally relaxed for this subtree because the metrics surface itself is an interceptor + controller + Nest module.
 
 ---
 

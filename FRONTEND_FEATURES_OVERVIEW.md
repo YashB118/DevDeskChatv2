@@ -168,9 +168,9 @@ The middle column in [DashboardLayout](frontend/src/app/router/layouts/Dashboard
 
 ---
 
-## 7. Notifications, Sound, Favicon ⏳ Deferred
+## 7. Notifications, Sound, Favicon ✅ Shipped
 
-Phase 10 work. The `features/notifications/` folder is a stub (`index.ts` only). The event bus already exposes a `message:received` shape via the chats sync hook surface; the notification service is not yet implemented.
+Phase 10. [features/notifications/notification.service.ts](frontend/src/features/notifications/notification.service.ts) exposes a pure `shouldNotify(payload, gates)` (fromSelf / global mute / per-chat mute / active+focused / opt-in / permission gating — every branch unit-tested) and `createNotificationService(gates, outputs)` (subscribes `eventBus.on('message:received')` emitted by [chats.sync.ts](frontend/src/features/chats/sync/chats.sync.ts)). [NotificationController](frontend/src/app/notifications/NotificationController.tsx) wires settings + global mute + chat-cache + active-chat into outputs. Side-effect helpers: [lib/notifications/permission.ts](frontend/src/lib/notifications/permission.ts), [sound.ts](frontend/src/lib/notifications/sound.ts) (preloaded `Audio`), [favicon.ts](frontend/src/lib/notifications/favicon.ts) (throttled canvas badge, capped at 99+). `NotificationPermissionBanner` opt-in flow with localStorage dismissal.
 
 ---
 
@@ -214,12 +214,12 @@ Cross-feature plumbing — [lib/data/useDirectory.ts](frontend/src/lib/data/useD
 
 ---
 
-## 12. User Preferences 🟡 Partial
+## 12. User Preferences ✅ Shipped
 
 - Theme preference persisted to localStorage with a synchronous bootstrap script in `index.html` ([public/theme-bootstrap.js](frontend/public/theme-bootstrap.js)) — no FOUC.
 - Chat filter preferences persisted to localStorage via [localStorage.ts](frontend/src/lib/storage/localStorage.ts) (Zod-validated on read).
 - Composer drafts persisted per-chat to localStorage.
-- The full Settings screen (notification toggles, sound preference, language placeholder) is Phase 10.
+- Notification preferences (desktop, sound, favicon badge) + language placeholder live in [shared/state/settings.ts](frontend/src/shared/state/settings.ts) (Zod-guarded localStorage); UI in [features/settings/components/SettingsScreen](frontend/src/features/settings/components/SettingsScreen/SettingsScreen.tsx) mounted on `/settings`.
 
 ---
 
@@ -267,7 +267,7 @@ Cross-feature plumbing — [lib/data/useDirectory.ts](frontend/src/lib/data/useD
 - Vitest + React Testing Library + `vitest-axe`.
 - MSW shared server in [tests/mocks/server.ts](frontend/src/tests/mocks/server.ts), lifecycle wired in [tests/setup.ts](frontend/src/tests/setup.ts).
 - `fake-indexeddb/auto` powers persistence tests.
-- **152 tests pass** across 40 files (foundation, design system, HTTP/auth/refresh queue, router guards, real-time core, persistence, chats sync + store + actions, messages optimistic + composer interaction, sessions/assignments/admin/feedback/mute sync mutations + MSW round-trips).
+- **171 tests pass** across 44 files (foundation, design system, HTTP/auth/refresh queue, router guards, real-time core, persistence, chats sync + store + actions, messages optimistic + composer interaction, sessions/assignments/admin/feedback/mute sync mutations + MSW round-trips, notification gating + favicon + offline send queue + settings store).
 - Playwright E2E and Chromatic visual regression are Phase 12.
 - Coverage thresholds (75% features, 90% realtime/lib) are not yet gated in CI.
 
@@ -298,9 +298,9 @@ Cross-feature plumbing — [lib/data/useDirectory.ts](frontend/src/lib/data/useD
 |---|---|---|
 | Admin features | 9 ✅ | Sessions panel, QR panel, assignments panel, user CRUD, feedback viewer, global mute — shipped |
 | Sessions monitoring | 9 ✅ | Live WAHA session list, QR refresh on `session:status` — shipped |
-| Notifications | 10 | Desktop notifications service, sound, favicon badge, permission banner, settings screen |
-| Offline send queue | 10 | `navigator.onLine` queue + retry on `online` |
-| Reduced-motion full audit | 10 | Already supported by the hook; full sweep + axe sweep pending |
+| Notifications | 10 ✅ | Desktop notifications service, sound, favicon badge, permission banner, settings screen — shipped |
+| Offline send queue | 10 ✅ | `navigator.onLine` queue + retry on `online` — shipped |
+| Reduced-motion full audit | 10/12 | `usePrefersReducedMotion` hook ships; per-route axe sweep + Chromatic visual regression deferred to Phase 12 |
 | Media handling | 10 (or w/ WAHA) | `useDecryptMedia`, MediaLightbox, MediaPlayer, MediaUploadDialog |
 | Composer extras | 10 | Emoji picker, mentions autocomplete, reply selector, forward dialog |
 | Observability | 11 | Sentry, Web Vitals beacons, custom metrics, debug overlay |

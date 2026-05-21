@@ -6,6 +6,7 @@
 - `src/infra/health/health.module.ts`
 - `src/infra/health/health.controller.ts`
 - `src/infra/health/redis.indicator.ts`
+- `src/infra/health/waha.indicator.ts` (Phase 10)
 
 The module lives under `src/infra/` rather than `src/modules/` because it is infrastructure-facing, not domain-facing. The same folder also holds the database and cache modules.
 
@@ -14,7 +15,7 @@ The module lives under `src/infra/` rather than `src/modules/` because it is inf
 ## 1. Responsibility
 
 - Provide `GET /health/live` — liveness probe (process up).
-- Provide `GET /health/ready` — readiness probe (Postgres + Redis reachable) via `@nestjs/terminus`.
+- Provide `GET /health/ready` — readiness probe (Postgres + Redis + WAHA reachable) via `@nestjs/terminus`. WAHA reachability is bounded by `HEALTH_WAHA_TIMEOUT_MS` and the result cached for `HEALTH_WAHA_CACHE_TTL_MS` so probe loops don't hammer the upstream (Phase 10).
 - Return responses that are deterministic, allocation-light, and safe to hit dozens of times per minute.
 
 ## 2. Endpoints

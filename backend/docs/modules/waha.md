@@ -33,7 +33,7 @@ Mutations (`sendText`, `sendMedia`, `editMessage`, `deleteMessage`, `reactToMess
 
 ## 3. Circuit breaker
 
-One per method (lazy-created). On open the call short-circuits with `ExternalServiceError(code: 'WAHA_UNAVAILABLE')` until cooldown elapses. After cooldown the next call enters half-open; success closes the circuit, failure re-opens immediately. State is observable via `WahaService.circuitStatus(method)` (Phase 10 wires it to a Prom gauge).
+One per method (lazy-created). On open the call short-circuits with `ExternalServiceError(code: 'WAHA_UNAVAILABLE')` until cooldown elapses. After cooldown the next call enters half-open; success closes the circuit, failure re-opens immediately. State is observable via `WahaService.circuitStatus(method)` and (Phase 10) projected onto the `waha_circuit_state{method}` Prom gauge (0=closed, 1=half-open, 2=open). Every call also feeds `waha_request_duration_seconds{method,outcome}` (histogram) and `waha_requests_total{method,outcome}` (counter) through `WahaService.instrument` so retries and circuit short-circuits land on the same surface.
 
 ## 4. Tests (`src/integrations/waha/*.spec.ts`)
 

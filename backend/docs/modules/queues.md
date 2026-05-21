@@ -17,7 +17,7 @@
 
 - Own the BullMQ root connection (one ioredis instance with `maxRetriesPerRequest: null`).
 - Apply env-driven defaults to every queue: `attempts`, exponential `backoff`, retain counts for completed/failed jobs.
-- Run a `WorkerHarness` around every handler so payload validation, correlation propagation, and per-job duration logging are uniform (Phase 10 will swap the log-based duration for a Prom histogram in one place).
+- Run a `WorkerHarness` around every handler so payload validation, correlation propagation, and per-job duration are uniform — Phase 10 wires `queue_job_duration_seconds` (histogram) and `queue_jobs_total` (counter), both labelled by `(queue, jobName, outcome)`, alongside the existing start/success/failure log fields.
 - Provide a path for producers (`@InjectQueue(name)`) and consumers (`@Processor(name)` extending `WorkerHost`).
 
 ## 2. Job envelope

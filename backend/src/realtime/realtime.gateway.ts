@@ -14,6 +14,7 @@ import { JwtService, type JwtVerifyOptions } from '@nestjs/jwt';
 import { type Server as IoServer } from 'socket.io';
 import { APP_CONFIG } from '@app/config/constants';
 import { type AppConfig } from '@app/config/env';
+import { activeSocketConnections } from '@app/shared/observability/metrics.registry';
 import { UserRole } from '@app/modules/users/user.types';
 import { type JwtPayload } from '@app/modules/auth/auth.types';
 import {
@@ -89,11 +90,13 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     await client.join(roomFor.user(payload.sub));
     if (payload.role === UserRole.ADMIN) await client.join(roomFor.admin());
 
+    activeSocketConnections.inc();
     this.logger.log(`socket ${client.id} connected user=${payload.sub} role=${payload.role}`);
   }
 
   handleDisconnect(client: AuthedSocket): void {
     const user = client.data.user;
+    if (user) activeSocketConnections.dec();
     this.logger.log(`socket ${client.id} disconnected${user ? ` user=${user.id}` : ''}`);
   }
 
