@@ -135,19 +135,21 @@ export class AuthService {
       throw new InvalidRefreshTokenError();
     }
 
-    if (candidate.expiresAt.getTime() <= Date.now()) {
-      await this.auth.writeAudit('auth.refresh.invalid', candidate.userId, {
-        reason: 'expired',
-      });
-      throw new InvalidRefreshTokenError();
-    }
-
+    // Reuse detection must beat expiry: a replayed-but-expired token is still
+    // a theft signal, and answering with `expired` instead of revoking the
+    // family leaves the attacker's live token (rotated successor) in play.
     if (candidate.revoked) {
-      // Replay of an already-rotated token → invalidate the whole family.
       await this.auth.revokeFamily(candidate.familyId);
       await this.auth.writeAudit('auth.refresh.reuse', candidate.userId, {
         familyId: candidate.familyId,
         ip: ctx.ip ?? null,
+      });
+      throw new InvalidRefreshTokenError();
+    }
+
+    if (candidate.expiresAt.getTime() <= Date.now()) {
+      await this.auth.writeAudit('auth.refresh.invalid', candidate.userId, {
+        reason: 'expired',
       });
       throw new InvalidRefreshTokenError();
     }

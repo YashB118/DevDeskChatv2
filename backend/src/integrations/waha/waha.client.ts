@@ -48,6 +48,21 @@ export class WahaClient {
     return this.get<WahaSession>(`/api/sessions/${encodeURIComponent(name)}`);
   }
 
+  /**
+   * Register a session in WAHA. Required before `startSession` — WAHA returns
+   * 422 on `/start` for an unknown session. Pass `start:true` to fuse create+start
+   * into a single round-trip.
+   */
+  createSession(
+    name: string,
+    options: { start?: boolean; config?: unknown } = {},
+  ): Promise<WahaSession> {
+    const body: Record<string, unknown> = { name };
+    if (options.start !== undefined) body.start = options.start;
+    if (options.config !== undefined) body.config = options.config;
+    return this.post<WahaSession>('/api/sessions', body);
+  }
+
   startSession(name: string): Promise<WahaSession> {
     return this.post<WahaSession>(`/api/sessions/${encodeURIComponent(name)}/start`, {});
   }
@@ -61,7 +76,7 @@ export class WahaClient {
   }
 
   getQrCode(name: string): Promise<WahaQrCode> {
-    return this.get<WahaQrCode>(`/api/${encodeURIComponent(name)}/auth/qr`);
+    return this.get<WahaQrCode>(`/api/sessions/${encodeURIComponent(name)}/auth/qr`);
   }
 
   // ----- Chats -----
@@ -88,8 +103,17 @@ export class WahaClient {
   }
 
   sendMedia(params: SendMediaParams): Promise<WahaMessage> {
-    const path = params.asDocument === true ? '/api/sendFile' : '/api/sendImage';
+    const path = this.mediaPathFor(params);
     return this.post<WahaMessage>(path, params, { timeout: this.mediaTimeoutMs });
+  }
+
+  private mediaPathFor(params: SendMediaParams): string {
+    if (params.asDocument === true) return '/api/sendFile';
+    const mime = params.file.mimetype.toLowerCase();
+    if (mime.startsWith('image/')) return '/api/sendImage';
+    if (mime.startsWith('video/')) return '/api/sendVideo';
+    if (mime.startsWith('audio/')) return '/api/sendVoice';
+    return '/api/sendFile';
   }
 
   editMessage(params: EditMessageParams): Promise<WahaMessage> {

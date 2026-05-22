@@ -42,7 +42,9 @@ describe('refresh queue', () => {
   });
 
   it('rejects without a registered handler', async () => {
-    await expect(refreshAccessToken()).rejects.toThrow('No refresh handler');
+    await expect(refreshAccessToken()).rejects.toMatchObject({
+      message: expect.stringContaining('No refresh handler') as unknown as string,
+    });
   });
 
   it('clears in-flight slot on rejection so retry is possible', async () => {
@@ -53,7 +55,7 @@ describe('refresh queue', () => {
       return Promise.resolve('tok');
     });
 
-    await expect(refreshAccessToken()).rejects.toThrow('boom');
+    await expect(refreshAccessToken()).rejects.toMatchObject({ message: 'boom' });
     expect(isRefreshing()).toBe(false);
     await expect(refreshAccessToken()).resolves.toBe('tok');
   });

@@ -63,6 +63,16 @@ function findById(data: MessagesCache, messageId: string): MessageDTO | null {
   return null;
 }
 
+function findByStanzaId(data: MessagesCache, stanzaId: string): MessageDTO | null {
+  if (!data) return null;
+  for (const page of data.pages) {
+    for (const m of page.items) {
+      if (m.stanzaId === stanzaId) return m;
+    }
+  }
+  return null;
+}
+
 export function makeTempId(): string {
   return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -142,8 +152,10 @@ export function markFailed(data: MessagesCache, tempId: string): MessagesCache {
 
 export function applyMessageNew(data: MessagesCache, payload: MessageNewPayload): MessagesCache {
   const m = payload.message;
-  const existing = findById(data, m.id);
-  if (existing) return data;
+  // Match on both `id` and `stanzaId` — an inbound event for our own send can
+  // arrive between the API onSuccess and the reconcile, so the optimistic row
+  // may still carry the tempId as `id` while its stanzaId already matches.
+  if (findById(data, m.id) ?? findByStanzaId(data, m.stanzaId)) return data;
 
   const enriched: MessageDTO = {
     id: m.id,

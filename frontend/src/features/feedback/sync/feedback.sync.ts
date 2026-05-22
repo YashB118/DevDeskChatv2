@@ -16,10 +16,12 @@ export function registerFeedbackSync(socket: AppSocket, qc: QueryClient): () => 
     const cached = qc.getQueryData<Cache>(keys.feedback());
     if (!cached) return;
     void feedbackApi
-      .list({ limit: 1 })
+      .list({ limit: 10 })
       .then((page) => {
-        const fresh = page.items[0];
-        if (fresh?.id !== parsed.data.id) return;
+        // Multiple `feedback:new` events can stack between fetches, so the
+        // newest row may not be position 0. Locate by id instead of position.
+        const fresh = page.items.find((f) => f.id === parsed.data.id);
+        if (!fresh) return;
         qc.setQueryData<Cache>(keys.feedback(), (data) => {
           if (!data) return data;
           const exists = data.pages.some((p) => p.items.some((f) => f.id === fresh.id));

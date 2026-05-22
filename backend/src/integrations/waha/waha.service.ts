@@ -87,6 +87,17 @@ export class WahaService {
     );
   }
 
+  createSession(
+    name: string,
+    options: { start?: boolean; config?: unknown } = {},
+  ): Promise<WahaSession> {
+    return this.mutate('createSession', () => this.client.createSession(name, options), [
+      () => {
+        this.invalidateSession(name);
+      },
+    ]);
+  }
+
   startSession(name: string): Promise<WahaSession> {
     return this.mutate('startSession', () => this.client.startSession(name), [
       () => {
@@ -189,9 +200,24 @@ export class WahaService {
       failureThreshold: this.cbFailureThreshold,
       cooldownMs: this.cbCooldownMs,
       errorCode: 'WAHA_UNAVAILABLE',
+      isFailure: (err) => this.isBreakerFailure(err),
     });
     this.breakers.set(method, cb);
     return cb;
+  }
+
+  /**
+   * Only count 5xx / network errors as breaker failures. Client errors
+   * (4xx — e.g. 404 unknown session, 422 invalid state) reflect caller
+   * intent, not upstream health, so they must not open the circuit.
+   */
+  private isBreakerFailure(err: unknown): boolean {
+    if (!(err instanceof ExternalServiceError)) return true;
+    const details = err.details;
+    if (details === undefined) return true;
+    const status = details.status;
+    if (typeof status === 'number') return status >= 500;
+    return details.axiosCode !== undefined;
   }
 
   private async callIdempotent<R>(method: string, fn: () => Promise<R>): Promise<R> {

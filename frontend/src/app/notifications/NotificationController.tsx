@@ -20,10 +20,21 @@ function findChat(qc: ReturnType<typeof useQueryClient>, chatId: string): ChatDT
 }
 
 function totalUnread(qc: ReturnType<typeof useQueryClient>): number {
+  // Filters create distinct cache entries under `['chats', filters]`. Reduce
+  // across every entry, deduping by chat id so the badge isn't double-counted.
   const entries = qc.getQueriesData<ChatsCache>({ queryKey: ['chats'] });
-  const first = entries[0]?.[1];
-  if (!first) return 0;
-  return first.pages.flatMap((p) => p.items).reduce((acc, c) => acc + c.unreadCount, 0);
+  const counted = new Map<string, number>();
+  for (const [, data] of entries) {
+    if (!data) continue;
+    for (const page of data.pages) {
+      for (const c of page.items) {
+        if (!counted.has(c.id)) counted.set(c.id, c.unreadCount);
+      }
+    }
+  }
+  let total = 0;
+  for (const n of counted.values()) total += n;
+  return total;
 }
 
 export function NotificationController({ children }: { children?: ReactNode }): ReactNode {

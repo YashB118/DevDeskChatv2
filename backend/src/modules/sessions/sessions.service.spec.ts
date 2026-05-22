@@ -37,6 +37,7 @@ function buildStubs(): Stubs {
       deleteByName: vi.fn(),
     } as unknown as SessionRepository,
     waha: {
+      createSession: vi.fn(),
       startSession: vi.fn(),
       stopSession: vi.fn(),
       deleteSession: vi.fn(),
@@ -76,7 +77,7 @@ describe('SessionsService', () => {
       status: 'STARTING',
       config: null,
     });
-    expect(stubs.waha.startSession).toHaveBeenCalledWith('s1');
+    expect(stubs.waha.createSession).toHaveBeenCalledWith('s1', { start: true });
     expect(out).toEqual(s);
   });
 

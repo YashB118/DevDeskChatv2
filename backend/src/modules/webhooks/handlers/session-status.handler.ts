@@ -5,7 +5,6 @@ import { type WebhookHandler } from '../handler.types';
 import { type NormalizedWebhookEvent } from '../webhook.schema';
 
 const Schema = z.object({
-  name: z.string().min(1).optional(),
   status: z.enum(['STARTING', 'SCAN_QR_CODE', 'WORKING', 'STOPPED', 'FAILED']),
 });
 
@@ -21,7 +20,8 @@ export class SessionStatusWebhookHandler implements WebhookHandler {
       this.logger.warn(`malformed session.status payload id=${event.id}`);
       return;
     }
-    const name = parsed.data.name ?? event.session;
-    await this.sessions.applyStatusUpdate(name, parsed.data.status);
+    // Trust the envelope `session`, never the payload — payload `name` would
+    // let an attacker mutate a different session's status.
+    await this.sessions.applyStatusUpdate(event.session, parsed.data.status);
   }
 }

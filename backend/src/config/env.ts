@@ -97,6 +97,13 @@ export const EnvSchema = z.object({
   WAHA_WEBHOOK_HMAC_SECRET: z.string().min(1).optional(),
   // Header name WAHA uses to deliver the HMAC signature.
   WAHA_WEBHOOK_HMAC_HEADER: z.string().min(1).default('x-webhook-hmac'),
+  // Replay protection: reject webhook envelopes whose `timestamp` (epoch ms)
+  // is older than this. 0 disables the check.
+  WAHA_WEBHOOK_MAX_AGE_MS: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .default(5 * 60 * 1000),
   // Pending-send reconciliation window (must outlive the WAHA round-trip).
   PENDING_MESSAGE_TTL_MS: z.coerce.number().int().positive().default(9000),
 

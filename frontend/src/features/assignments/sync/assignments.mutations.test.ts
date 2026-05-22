@@ -24,10 +24,10 @@ function cache(items: AssignmentDTO[]): InfiniteData<AssignmentList> {
 }
 
 describe('assignments mutations', () => {
-  it('applyAssigned writes userId + flips isActive on the matched chat only', () => {
+  it('applyAssigned mutates the matching assignmentId row when one exists', () => {
     const data = cache([
-      row({ chatId: 'c-1', isActive: false }),
-      row({ chatId: 'c-2', userId: 'u-orig' }),
+      row({ id: '00000000-0000-0000-0000-0000000000aa', chatId: 'c-1', isActive: false }),
+      row({ id: '00000000-0000-0000-0000-0000000000ff', chatId: 'c-2', userId: 'u-orig' }),
     ]);
     const next = applyAssigned(data, {
       assignmentId: '00000000-0000-0000-0000-0000000000aa',
@@ -36,14 +36,39 @@ describe('assignments mutations', () => {
       assignedBy: null,
       assignedAt: '2026-02-01T00:00:00.000Z',
     });
+    expect(next!.pages[0]!.items).toHaveLength(2);
+    expect(next!.pages[0]!.items[0]!.id).toBe('00000000-0000-0000-0000-0000000000aa');
     expect(next!.pages[0]!.items[0]!.userId).toBe('00000000-0000-0000-0000-0000000000bb');
     expect(next!.pages[0]!.items[0]!.isActive).toBe(true);
-    expect(next!.pages[0]!.items[0]!.id).toBe('00000000-0000-0000-0000-0000000000aa');
     expect(next!.pages[0]!.items[1]!.userId).toBe('u-orig');
   });
 
-  it('applyUnassigned flips isActive, clears name, records backend unassignedAt', () => {
-    const data = cache([row({ chatId: 'c-1', userId: 'u-9', assignedToName: 'Yash' })]);
+  it('applyAssigned prepends a new row when no matching assignment is cached', () => {
+    const data = cache([row({ id: '00000000-0000-0000-0000-0000000000ff', chatId: 'c-2' })]);
+    const next = applyAssigned(data, {
+      assignmentId: '00000000-0000-0000-0000-0000000000aa',
+      userId: '00000000-0000-0000-0000-0000000000bb',
+      chatId: 'c-new',
+      assignedBy: null,
+      assignedAt: '2026-02-01T00:00:00.000Z',
+    });
+    expect(next!.pages[0]!.items).toHaveLength(2);
+    expect(next!.pages[0]!.items[0]!.id).toBe('00000000-0000-0000-0000-0000000000aa');
+    expect(next!.pages[0]!.items[0]!.chatId).toBe('c-new');
+    expect(next!.pages[0]!.items[0]!.isActive).toBe(true);
+  });
+
+  it('applyUnassigned flips isActive on the assignment with the matching id', () => {
+    const data = cache([
+      row({
+        id: '00000000-0000-0000-0000-0000000000aa',
+        chatId: 'c-1',
+        userId: 'u-9',
+        assignedToName: 'Yash',
+      }),
+      // Historical row for the same chat must not be touched.
+      row({ id: '00000000-0000-0000-0000-0000000000bb', chatId: 'c-1', isActive: false }),
+    ]);
     const next = applyUnassigned(data, {
       assignmentId: '00000000-0000-0000-0000-0000000000aa',
       userId: '00000000-0000-0000-0000-000000000001',
@@ -54,6 +79,8 @@ describe('assignments mutations', () => {
     expect(next!.pages[0]!.items[0]!.isActive).toBe(false);
     expect(next!.pages[0]!.items[0]!.assignedToName).toBeNull();
     expect(next!.pages[0]!.items[0]!.unassignedAt).toBe('2026-02-01T00:00:00.000Z');
+    expect(next!.pages[0]!.items[1]!.isActive).toBe(false);
+    expect(next!.pages[0]!.items[1]!.unassignedAt).toBeNull();
   });
 
   it('is a pass-through for undefined data', () => {

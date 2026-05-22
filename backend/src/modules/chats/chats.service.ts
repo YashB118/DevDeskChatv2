@@ -168,11 +168,10 @@ export class ChatsService {
   }
 
   private async invalidateUserCache(userId: string): Promise<void> {
-    // Keyspace `chats:list:<user>:*` — the existing CacheService has no SCAN
-    // helper, so the simplest correct thing is to drop the known prefixes the
-    // UI uses. We delete the default-page key explicitly and rely on the 10s
-    // TTL to flush long-tail pages quickly.
-    await this.cache.del(`chats:list:${userId}:default:50:0`);
+    // Drop every cached page for this user. SCAN-based prefix delete covers
+    // the (session, limit, offset) cartesian without us having to track every
+    // variant the UI may have requested.
+    await this.cache.delByPrefix(`chats:list:${userId}:`);
   }
 }
 

@@ -3,16 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "description": "Shared Zod event/contract schemas between backend and frontend.",
-  "main": "./dist/events.js",
-  "types": "./dist/events.d.ts",
+  "main": "./dist/cjs/events.js",
+  "module": "./dist/esm/events.js",
+  "types": "./dist/cjs/events.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/events.d.ts",
-      "default": "./dist/events.js"
+      "types": "./dist/cjs/events.d.ts",
+      "import": "./dist/esm/events.js",
+      "require": "./dist/cjs/events.js",
+      "default": "./dist/cjs/events.js"
     },
     "./events": {
-      "types": "./dist/events.d.ts",
-      "default": "./dist/events.js"
+      "types": "./dist/cjs/events.d.ts",
+      "import": "./dist/esm/events.js",
+      "require": "./dist/cjs/events.js",
+      "default": "./dist/cjs/events.js"
     },
     "./package.json": "./package.json"
   },
@@ -21,11 +26,13 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build:cjs": "tsc -p tsconfig.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build": "npm run build:cjs && npm run build:esm",
     "dev": "tsc -p tsconfig.json --watch",
     "clean": "rimraf dist",
     "test": "vitest run",
-    "prepare": "tsc -p tsconfig.json"
+    "prepare": "npm run build"
   },
   "peerDependencies": {
     "zod": "^3.23"

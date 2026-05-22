@@ -8,12 +8,26 @@ function load(): Settings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw === null) return DEFAULT_SETTINGS;
-    const parsed = SettingsSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
+    const parsedJson = JSON.parse(raw) as unknown;
+    // Migration-friendly load: parse with the strict schema, but on failure
+    // merge what we can recover against defaults instead of wiping the whole
+    // blob. Adding a new field then must not destroy the user's other prefs.
+    const strict = SettingsSchema.safeParse(parsedJson);
+    if (strict.success) return strict.data;
+    const partial = (parsedJson ?? {}) as Partial<Settings>;
+    const merged: Settings = {
+      notifications: {
+        ...DEFAULT_SETTINGS.notifications,
+        ...(partial.notifications ?? {}),
+      },
+      language: partial.language ?? DEFAULT_SETTINGS.language,
+    };
+    const finalCheck = SettingsSchema.safeParse(merged);
+    if (!finalCheck.success) {
       window.localStorage.removeItem(STORAGE_KEY);
       return DEFAULT_SETTINGS;
     }
-    return parsed.data;
+    return finalCheck.data;
   } catch {
     return DEFAULT_SETTINGS;
   }

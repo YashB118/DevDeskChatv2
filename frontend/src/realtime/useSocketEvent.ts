@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { OutboundEvents, type OutboundEventName, type OutboundPayload } from './events.contract';
 import { eventBus } from './eventBus';
 import { useSocket } from './useSocket';
@@ -14,6 +14,10 @@ type Handler<E extends OutboundEventName> = (payload: OutboundPayload<E>) => voi
  */
 export function useSocketEvent<E extends OutboundEventName>(event: E, handler: Handler<E>): void {
   const socket = useSocket();
+  // Stash the handler in a ref so callers can pass inline closures without
+  // causing the listener to be detached and reattached every render.
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
 
   useEffect(() => {
     if (!socket) return;
@@ -29,7 +33,7 @@ export function useSocketEvent<E extends OutboundEventName>(event: E, handler: H
         eventBus.emit('app:error', { message, cause: parsed.error });
         return;
       }
-      handler(parsed.data);
+      handlerRef.current(parsed.data);
     }) as (...args: unknown[]) => void;
 
     type AnyListener = (...args: unknown[]) => void;
@@ -37,5 +41,5 @@ export function useSocketEvent<E extends OutboundEventName>(event: E, handler: H
     return () => {
       (socket.off as (e: string, l: AnyListener) => void)(event, wrapped);
     };
-  }, [socket, event, handler]);
+  }, [socket, event]);
 }

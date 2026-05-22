@@ -27,6 +27,9 @@ export class WebhooksController {
     if (!this.service.verifySignature(req.rawBody, signature)) {
       throw new UnauthorizedException('invalid webhook signature');
     }
+    if (!this.service.isFresh(body)) {
+      throw new UnauthorizedException('webhook timestamp outside acceptable window');
+    }
     await this.service.enqueue(body, correlationId);
     return { accepted: true };
   }

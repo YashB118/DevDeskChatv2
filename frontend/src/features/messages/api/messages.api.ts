@@ -75,11 +75,15 @@ export const messagesApi = {
     if (cursor) params.beforeStanzaId = cursor;
     const res = await apiClient.get<unknown>(`/api/messages/${chatId}`, { params });
     const parsed = BackendMessageListResponseSchema.parse(res.data);
-    // Backend has no cursor — last stanzaId acts as the next-page key.
-    const last = parsed.messages[parsed.messages.length - 1];
+    // Backend returns DESC (newest-first). Reverse so each page is ordered
+    // oldest→newest, which is what the renderer and `appendOptimistic` expect.
+    // The next-page (older) cursor is the OLDEST stanzaId on this page —
+    // i.e. the last element of the DESC response, *before* reversing.
+    const oldest = parsed.messages[parsed.messages.length - 1];
+    const reversed = [...parsed.messages].reverse();
     return {
-      items: parsed.messages.map(adaptMessage),
-      nextCursor: parsed.messages.length >= limit && last ? last.stanzaId : null,
+      items: reversed.map(adaptMessage),
+      nextCursor: parsed.messages.length >= limit && oldest ? oldest.stanzaId : null,
     };
   },
 
@@ -129,11 +133,10 @@ export const messagesApi = {
     return res.data;
   },
 
-  /**
-   * Phase 6 lands `GET /api/chats/:chatId/participants` on the backend. Until
-   * then this stub returns an empty list so mention autocomplete renders cleanly.
-   */
-  async participants(_chatId: ChatId): Promise<readonly { id: string; name: string }[]> {
-    return [];
+  async participants(chatId: ChatId): Promise<readonly { id: string; name: string }[]> {
+    const res = await apiClient.get<{ items: { id: string; name: string }[] }>(
+      `/api/chats/${chatId}/participants`,
+    );
+    return res.data.items;
   },
 };

@@ -11,8 +11,9 @@ const Schema = z.object({
   chatId: z.string().min(1).optional(),
   from: z.string().min(1).optional(),
   sender: z.string().min(1).optional(),
-  reaction: z.string().min(1).nullable().optional(),
-  emoji: z.string().min(1).nullable().optional(),
+  // Empty string ⇒ reaction removed. min(0) lets the un-react path through.
+  reaction: z.string().nullable().optional(),
+  emoji: z.string().nullable().optional(),
 });
 
 @Injectable()
@@ -33,16 +34,17 @@ export class MessageReactionWebhookHandler implements WebhookHandler {
     const p = parsed.data;
     const stanzaId = p.id ?? p.messageId;
     const chatId = p.chatId ?? p.from;
-    const senderJid = p.sender ?? p.from;
-    const emoji = p.emoji ?? p.reaction ?? null;
-    if (
-      stanzaId === undefined ||
-      chatId === undefined ||
-      senderJid === undefined ||
-      emoji === null
-    ) {
+    // Sender must be a distinct reactor JID — falling back to `from` (the chat
+    // JID) for groups would key the toggle against the chat instead of the
+    // reacting user.
+    const senderJid = p.sender;
+    const emojiRaw = p.emoji ?? p.reaction ?? null;
+    if (stanzaId === undefined || chatId === undefined || senderJid === undefined) {
       return;
     }
+    // null/empty emoji means "reaction removed" — pass empty string through so
+    // the toggle path can detect and clear the row.
+    const emoji = emojiRaw ?? '';
     const result = await this.messages.upsertReactionToggle({
       stanzaId,
       senderJid,

@@ -16,10 +16,16 @@ export const useConnectionStatusStore = create<ConnectionStatusState>((set) => (
   attempt: 0,
   lastError: null,
   setStatus: (status, lastError) =>
-    { set((prev) => ({
-      status,
-      lastError: lastError === undefined ? prev.lastError : lastError,
-    })); },
+    {
+      // Treat reaching a healthy state as a positive signal that clears stale
+      // error text. Callers that need to keep the prior error must pass it in.
+      const cleared = status === 'connected' || status === 'idle';
+      set((prev) => ({
+        status,
+        lastError:
+          lastError === undefined ? (cleared ? null : prev.lastError) : lastError,
+      }));
+    },
   setAttempt: (attempt) => { set({ attempt }); },
   reset: () => { set({ status: 'idle', attempt: 0, lastError: null }); },
 }));

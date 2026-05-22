@@ -36,6 +36,23 @@ export class CacheService {
     await this.redis.del(key);
   }
 
+  /**
+   * Best-effort prefix delete using SCAN so we don't block the redis loop.
+   * Used by callers that can't enumerate every key (e.g. paginated list caches).
+   */
+  async delByPrefix(prefix: string): Promise<number> {
+    let cursor = '0';
+    let removed = 0;
+    do {
+      const [next, batch] = await this.redis.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 200);
+      cursor = next;
+      if (batch.length > 0) {
+        removed += await this.redis.del(...batch);
+      }
+    } while (cursor !== '0');
+    return removed;
+  }
+
   async wrap<T>(key: string, loader: () => Promise<T>, opts: WrapOptions<T>): Promise<T> {
     const namespace = key.split(':')[0] ?? 'unknown';
     const cached = await this.get(key, opts.schema);

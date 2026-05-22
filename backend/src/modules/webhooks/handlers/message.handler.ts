@@ -63,12 +63,18 @@ export class MessageWebhookHandler implements WebhookHandler {
       this.logger.warn(`no chatId for message id=${m.id}`);
       return;
     }
+    if (m.from === undefined && m.fromMe !== true) {
+      // No author JID and not flagged as outbound → can't attribute. Skip
+      // rather than persist a placeholder that pollutes sender filters.
+      this.logger.warn(`no fromJid for inbound message id=${m.id}`);
+      return;
+    }
     const sentAt =
       m.timestamp !== undefined && m.timestamp > 0 ? new Date(m.timestamp * 1000) : new Date();
     await this.messages.upsertFromWebhook({
       chatId,
       stanzaId: m.id,
-      fromJid: m.from ?? 'unknown',
+      fromJid: m.from ?? chatId,
       fromMe: m.fromMe ?? false,
       body: m.body ?? null,
       type: inferType(m.type),
