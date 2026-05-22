@@ -34,4 +34,10 @@ export class ChatPolicy {
       throw new ForbiddenError('Chat not assigned to user');
     }
   }
+
+  async assertCanRead(user: UserDomain, chatId: string): Promise<void> {
+    if (!(await this.canReadChat(user, chatId))) {
+      throw new ForbiddenError('Chat not assigned to user');
+    }
+  }
 }

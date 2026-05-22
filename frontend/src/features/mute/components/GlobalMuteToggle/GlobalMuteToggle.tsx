@@ -7,16 +7,16 @@ import { useGlobalMute, useGlobalMuteActions } from '../../hooks/useGlobalMute';
 
 export function GlobalMuteToggle(): ReactElement {
   const { data, isLoading } = useGlobalMute();
-  const { setMuted, isPending } = useGlobalMuteActions();
+  const { setEnabled, isPending } = useGlobalMuteActions();
   const { push } = useToast();
 
   if (isLoading) return <Spinner aria-label="Loading mute state" />;
 
-  const muted = data?.muted ?? false;
+  const enabled = data?.enabled ?? false;
 
   const onChange = async (next: boolean): Promise<void> => {
     try {
-      await setMuted(next);
+      await setEnabled(next);
       push({
         title: next ? 'Globally muted' : 'Global mute off',
         description: undefined,
@@ -32,7 +32,7 @@ export function GlobalMuteToggle(): ReactElement {
     <div className="flex items-center gap-3 text-[length:var(--text-sm)]">
       <span id="global-mute-label">Global mute (suppress all notifications workspace-wide)</span>
       <Switch
-        checked={muted}
+        checked={enabled}
         disabled={isPending}
         aria-labelledby="global-mute-label"
         onCheckedChange={(next) => {

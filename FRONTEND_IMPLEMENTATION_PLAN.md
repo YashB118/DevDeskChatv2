@@ -42,6 +42,7 @@ Each phase contains:
 | **10** | Notifications, accessibility audit, offline resilience | ✅ Done |
 | **11** | Observability, performance budgets, hardening | ⏳ Pending |
 | **12** | Testing maturity, CI/CD, deployment | ⏳ Pending |
+| **Sync** | Frontend↔backend wire-up (shared contracts pkg, REST/event alignment) | ✅ Done |
 
 ---
 
@@ -994,3 +995,24 @@ Bring testing to the production bar, finalize the CI/CD pipeline, and produce de
 - [ ] All new socket events appear in `events.contract.ts` and have a sync handler.
 
 When that checklist is true at every phase boundary, the frontend stays production-ready throughout the build.
+
+---
+
+# Phase Sync — Frontend ↔ Backend Wire-Up
+
+### Overview
+Bridge phase landed after frontend Phase 10 + backend Phase 11. Brings the frontend into runtime alignment with the actual backend surface.
+
+### What landed
+- New shared workspace package `@devdesk/contracts` consumed by both apps via `frontend/src/realtime/events.contract.ts` re-export. Phases that change socket payloads now bump one file.
+- `frontend/src/features/admin` switched to `/api/admin/users` and now unwraps `{user}`-envelope responses. Toggle no longer calls PATCH `{disabled}` — uses dedicated `/disable` and `/enable` POSTs.
+- `frontend/src/features/assignments` switched to `/api/admin/assignments`. `AssignmentDTO` mirrors backend `AssignmentDomain` (`id`, `userId`, `isActive`, `assignedAt`, `unassignedAt`, etc.); `unassign` takes an assignment row UUID.
+- `frontend/src/features/chats/api/chats.api.ts` rewired chat-row assign/unassign to call the admin endpoints, chat mute to `POST /api/mute/chat`.
+- `frontend/src/features/mute` switched to `POST /api/mute/global` body `{enabled}`; hook renamed to `setEnabled`.
+- `frontend/src/features/feedback` types mirror backend `FeedbackDomain` (`body`, `userId`, `createdAt`); list adapter wraps `{feedback}` → `{items, nextCursor:null}`; `unreadOnly` sent as `'true'`.
+- `frontend/src/features/messages` REST: every write call sends `{session}`; route params use `stanzaId`; `send` returns `{id, stanzaId}` (full DTO arrives via `message:new` echo); `react` is POST-only with toggle semantics. List adapter maps backend `MessageResponse` → `MessageDTO`.
+- Sync handlers + optimistic helpers in `features/messages/optimistic/index.ts`, `features/chats/sync/`, `features/assignments/sync/` operate on canonical backend payload shapes (datetime → numeric ms conversion at the handler boundary, `stanzaId` / `senderJid` / `removed` for messages, full audit fields for assignments).
+- New listener: `group:participants` invalidates `keys.chatParticipants(chatId)`.
+
+### Status
+**Complete.** 43/44 test files pass (2 pre-existing retry-test failures unrelated to sync work). Live cross-browser sync test deferred to Phase 12 Playwright suite.

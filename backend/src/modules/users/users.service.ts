@@ -75,12 +75,14 @@ export class UsersService {
 
   async update(id: UserId, input: UpdateUserInput, actorId: UserId | null): Promise<UserDomain> {
     const patch = toRepoPatch(input);
-    return this.tx.run(async (em) => {
-      const updated = await this.users.update(id, patch, em);
-      if (updated === null) throw new UserNotFoundError(id);
+    const updated = await this.tx.run(async (em) => {
+      const next = await this.users.update(id, patch, em);
+      if (next === null) throw new UserNotFoundError(id);
       await this.auth.writeAudit('user.update', actorId, { targetUserId: id, changes: patch }, em);
-      return updated;
+      return next;
     });
+    this.broadcastUserUpdate(updated);
+    return updated;
   }
 
   async setDisabled(id: UserId, disabled: boolean, actorId: UserId | null): Promise<UserDomain> {
@@ -110,6 +112,7 @@ export class UsersService {
       // token issuance is already barred by `disabled = true`.
       this.emitter.disconnectUser(id);
     }
+    this.broadcastUserUpdate(updated);
     return updated;
   }
 
@@ -128,5 +131,19 @@ export class UsersService {
     });
     // Force any active sockets off — the user must re-authenticate.
     this.emitter.disconnectUser(id);
+    // The disabled flag isn't changing here, but a forced re-auth still
+    // counts as a user-state event — admins should see it in their inbox.
+    const refreshed = await this.users.findById(id);
+    if (refreshed) this.broadcastUserUpdate(refreshed);
+  }
+
+  /**
+   * Push the latest disabled/role flags to admins + the affected user's own
+   * sessions so the UI reflects the change without a refresh.
+   */
+  private broadcastUserUpdate(user: UserDomain): void {
+    const payload = { id: user.id, disabled: user.disabled, role: user.role };
+    this.emitter.toAdmins('user:updated', payload);
+    this.emitter.toUser(user.id, 'user:updated', payload);
   }
 }

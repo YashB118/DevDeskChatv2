@@ -56,6 +56,7 @@ export type AuditEvent =
   | 'mute.chat.set'
   | 'mute.global.set'
   | 'session.create'
+  | 'session.create_failed'
   | 'session.start'
   | 'session.stop'
   | 'session.delete';

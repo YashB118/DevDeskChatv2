@@ -50,6 +50,10 @@ function buildStubs(): Stubs {
       run: vi.fn(async (fn: (em: unknown) => Promise<unknown>) => fn({})),
     } as unknown as TransactionRunner,
     emitter: {
+      toUser: vi.fn(),
+      toChat: vi.fn(),
+      toAdmins: vi.fn(),
+      toSocket: vi.fn(),
       disconnectUser: vi.fn(() => undefined),
     } as unknown as SocketEmitter,
     cfg: { BCRYPT_COST: 4 } as unknown as AppConfig,

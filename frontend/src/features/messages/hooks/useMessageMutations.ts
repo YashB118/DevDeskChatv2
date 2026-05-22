@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { keys } from '@/shared/state/queryKeys';
 import { useCurrentUserId } from '@/shared/state/currentUser';
-import type { ChatId, MessageId } from '@/shared/types/ids';
+import type { ChatId } from '@/shared/types/ids';
 import { useConnectivityStore } from '@/lib/offline/connectivity';
 import { enqueueSend } from '@/lib/offline/sendQueue';
 import { messagesApi } from '../api/messages.api';
@@ -24,13 +24,13 @@ export interface UseSendMessageReturn {
   isSending: boolean;
 }
 
-export function useSendMessage(chatId: ChatId): UseSendMessageReturn {
+export function useSendMessage(chatId: ChatId, session: string): UseSendMessageReturn {
   const qc = useQueryClient();
   const userId = useCurrentUserId();
 
   const mutation = useMutation({
-    mutationFn: ({ input, tempId }: { input: SendMessageInput; tempId: string }) =>
-      messagesApi.send(chatId, input, tempId),
+    mutationFn: ({ input, tempId: _tempId }: { input: SendMessageInput; tempId: string }) =>
+      messagesApi.send(chatId, session, input),
     onMutate: ({ input, tempId }) => {
       if (!userId) return { tempId };
       const optimistic = buildPending(chatId, userId, input, tempId);
@@ -62,7 +62,7 @@ export function useSendMessage(chatId: ChatId): UseSendMessageReturn {
           );
         }
         enqueueSend(async () => {
-          const server = await messagesApi.send(chatId, input, tempId);
+          const server = await messagesApi.send(chatId, session, input);
           qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
             reconcileSend(data, tempId, server),
           );
@@ -71,23 +71,23 @@ export function useSendMessage(chatId: ChatId): UseSendMessageReturn {
       }
       await mutation.mutateAsync({ input, tempId });
     },
-    [mutation, chatId, qc, userId],
+    [mutation, chatId, qc, userId, session],
   );
 
   return { send, isSending: mutation.isPending };
 }
 
-export function useEditMessage(chatId: ChatId): {
-  edit: (messageId: MessageId, body: string) => Promise<void>;
+export function useEditMessage(chatId: ChatId, session: string): {
+  edit: (stanzaId: string, body: string) => Promise<void>;
 } {
   const qc = useQueryClient();
   const mutation = useMutation({
-    mutationFn: ({ messageId, body }: { messageId: MessageId; body: string }) =>
-      messagesApi.edit(chatId, messageId, body),
-    onMutate: ({ messageId, body }) => {
+    mutationFn: ({ stanzaId, body }: { stanzaId: string; body: string }) =>
+      messagesApi.edit(chatId, stanzaId, session, body),
+    onMutate: ({ stanzaId, body }) => {
       const prev = qc.getQueryData<MessagesCache>(keys.messages(chatId));
       qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
-        applyEdit(data, { messageId, body }),
+        applyEdit(data, { messageId: stanzaId, body }),
       );
       return { prev };
     },
@@ -97,22 +97,22 @@ export function useEditMessage(chatId: ChatId): {
   });
 
   return {
-    edit: async (messageId, body) => {
-      await mutation.mutateAsync({ messageId, body });
+    edit: async (stanzaId, body) => {
+      await mutation.mutateAsync({ stanzaId, body });
     },
   };
 }
 
-export function useDeleteMessage(chatId: ChatId): {
-  remove: (messageId: MessageId) => Promise<void>;
+export function useDeleteMessage(chatId: ChatId, session: string): {
+  remove: (stanzaId: string) => Promise<void>;
 } {
   const qc = useQueryClient();
   const mutation = useMutation({
-    mutationFn: (messageId: MessageId) => messagesApi.delete(chatId, messageId),
-    onMutate: (messageId) => {
+    mutationFn: (stanzaId: string) => messagesApi.delete(chatId, stanzaId, session),
+    onMutate: (stanzaId) => {
       const prev = qc.getQueryData<MessagesCache>(keys.messages(chatId));
       qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
-        applyDelete(data, { messageId }),
+        applyDelete(data, { messageId: stanzaId }),
       );
       return { prev };
     },
@@ -122,37 +122,42 @@ export function useDeleteMessage(chatId: ChatId): {
   });
 
   return {
-    remove: async (messageId) => {
-      await mutation.mutateAsync(messageId);
+    remove: async (stanzaId) => {
+      await mutation.mutateAsync(stanzaId);
     },
   };
 }
 
-export function useReactToMessage(chatId: ChatId): {
-  react: (messageId: MessageId, emoji: string | null) => Promise<void>;
+/**
+ * Backend toggle: POST `/react` with `{session, emoji}` always; response
+ * `{removed}` tells us which direction we landed. The optimistic step happens
+ * after the round-trip — the toggle is too easy to mispredict from the cache.
+ */
+export function useReactToMessage(chatId: ChatId, session: string): {
+  react: (stanzaId: string, emoji: string) => Promise<void>;
 } {
   const qc = useQueryClient();
   const userId = useCurrentUserId();
 
   const mutation = useMutation({
-    mutationFn: ({ messageId, emoji }: { messageId: MessageId; emoji: string | null }) =>
-      messagesApi.react(chatId, messageId, emoji),
-    onMutate: ({ messageId, emoji }) => {
-      if (!userId) return { prev: undefined };
-      const prev = qc.getQueryData<MessagesCache>(keys.messages(chatId));
+    mutationFn: ({ stanzaId, emoji }: { stanzaId: string; emoji: string }) =>
+      messagesApi.react(chatId, stanzaId, session, emoji),
+    onSuccess: (result, vars) => {
+      if (!userId) return;
       qc.setQueryData<MessagesCache>(keys.messages(chatId), (data) =>
-        applyReaction(data, { chatId, messageId, userId, emoji }),
+        applyReaction(data, {
+          chatId,
+          messageId: vars.stanzaId,
+          userId,
+          emoji: result.removed ? null : vars.emoji,
+        }),
       );
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) qc.setQueryData(keys.messages(chatId), ctx.prev);
     },
   });
 
   return {
-    react: async (messageId, emoji) => {
-      await mutation.mutateAsync({ messageId, emoji });
+    react: async (stanzaId, emoji) => {
+      await mutation.mutateAsync({ stanzaId, emoji });
     },
   };
 }

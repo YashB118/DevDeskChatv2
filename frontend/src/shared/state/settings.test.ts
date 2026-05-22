@@ -12,7 +12,8 @@ describe('settings store', () => {
     useSettingsStore.getState().setNotifications({ desktopEnabled: true });
     expect(useSettingsStore.getState().settings.notifications.desktopEnabled).toBe(true);
     const raw = window.localStorage.getItem('settings:v1');
-    expect(raw && JSON.parse(raw).notifications.desktopEnabled).toBe(true);
+    const parsed = raw ? (JSON.parse(raw) as { notifications: { desktopEnabled: boolean } }) : null;
+    expect(parsed?.notifications.desktopEnabled).toBe(true);
   });
 
   it('reset returns to defaults', () => {

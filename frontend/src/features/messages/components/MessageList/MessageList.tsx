@@ -7,12 +7,12 @@ import { useCurrentUserId } from '@/shared/state/currentUser';
 import { useMessages } from '../../hooks/useMessages';
 import { useReactToMessage } from '../../hooks/useMessageMutations';
 import { useMessagesUIStore } from '../../store/messages.store';
-import { toMessageId } from '@/shared/types/ids';
 import type { MessageDTO } from '../../types';
 import { MessageBubble } from '../MessageBubble/MessageBubble';
 
 interface MessageListProps {
   chatId: ChatId;
+  session: string;
 }
 
 function dayKey(ts: number): string {
@@ -37,11 +37,11 @@ function buildRows(messages: readonly MessageDTO[]): Row[] {
   return rows;
 }
 
-export function MessageList({ chatId }: MessageListProps): ReactElement {
+export function MessageList({ chatId, session }: MessageListProps): ReactElement {
   const { messages, isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage } =
-    useMessages(chatId);
+    useMessages(chatId, session);
   const userId = useCurrentUserId();
-  const { react } = useReactToMessage(chatId);
+  const { react } = useReactToMessage(chatId, session);
   const search = useMessagesUIStore((s) => s.search[chatId] ?? '');
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -93,7 +93,8 @@ export function MessageList({ chatId }: MessageListProps): ReactElement {
               currentUserId={userId}
               highlight={search}
               onReact={(emoji) => {
-                void react(toMessageId(row.message.id), emoji);
+                if (emoji === null) return;
+                void react(row.message.stanzaId, emoji);
               }}
             />
           </div>

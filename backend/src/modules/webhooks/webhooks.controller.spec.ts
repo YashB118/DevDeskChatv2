@@ -5,10 +5,15 @@ import { WebhooksController } from './webhooks.controller';
 import { type WebhooksService } from './webhooks.service';
 import { type WebhookEnvelope } from './webhook.schema';
 
-function buildService(opts: { verify?: boolean; header?: string }): WebhooksService {
+function buildService(opts: {
+  verify?: boolean;
+  header?: string;
+  fresh?: boolean;
+}): WebhooksService {
   return {
     hmacHeaderName: vi.fn(() => opts.header ?? 'x-webhook-hmac'),
     verifySignature: vi.fn(() => opts.verify ?? true),
+    isFresh: vi.fn(() => opts.fresh ?? true),
     enqueue: vi.fn(async () => undefined),
   } as unknown as WebhooksService;
 }

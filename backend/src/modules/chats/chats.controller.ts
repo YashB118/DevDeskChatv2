@@ -75,6 +75,20 @@ export class ChatsController {
     return { chats: await this.service.sync(user, session) };
   }
 
+  /**
+   * Participants of a chat. Used by the frontend's @-mention autocomplete.
+   * Until the WAHA client exposes a group-members call, this returns an empty
+   * list — the contract exists so the UI never 404s.
+   */
+  @Get(':chatId/participants')
+  async participants(
+    @CurrentUser() current: AuthenticatedRequestUser,
+    @Param('chatId') chatId: string,
+  ): Promise<{ items: { id: string; name: string }[] }> {
+    const user = await this.resolveUser(current);
+    return { items: await this.service.listParticipants(user, chatId) };
+  }
+
   private async resolveUser(current: AuthenticatedRequestUser): Promise<UserDomain> {
     const user = await this.users.findById(UserId(current.id));
     if (user === null) throw new NotFoundError('user');

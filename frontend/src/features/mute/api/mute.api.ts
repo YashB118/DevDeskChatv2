@@ -6,8 +6,9 @@ export const muteApi = {
     const res = await apiClient.get<unknown>('/api/mute/global');
     return GlobalMuteSchema.parse(res.data);
   },
-  async set(muted: boolean): Promise<GlobalMute> {
-    const res = await apiClient.patch<unknown>('/api/mute/global', { muted });
+
+  async set(enabled: boolean): Promise<GlobalMute> {
+    const res = await apiClient.post<unknown>('/api/mute/global', { enabled });
     return GlobalMuteSchema.parse(res.data);
   },
 };

@@ -8,15 +8,20 @@ export const SendTextSchema = z.object({
 });
 export type SendTextInput = z.infer<typeof SendTextSchema>;
 
-export const SendMediaSchema = z.object({
-  session: z.string().min(1).max(128),
-  mimetype: z.string().min(1).max(255),
-  data: z.string().min(1).optional(),
-  url: z.string().url().optional(),
-  filename: z.string().min(1).max(255).optional(),
-  caption: z.string().max(8000).optional(),
-  asDocument: z.boolean().optional(),
-});
+export const SendMediaSchema = z
+  .object({
+    session: z.string().min(1).max(128),
+    mimetype: z.string().min(1).max(255),
+    data: z.string().min(1).optional(),
+    url: z.string().url().optional(),
+    filename: z.string().min(1).max(255).optional(),
+    caption: z.string().max(8000).optional(),
+    asDocument: z.boolean().optional(),
+  })
+  .refine((v) => (v.data === undefined) !== (v.url === undefined), {
+    message: 'Exactly one of `data` or `url` must be provided',
+    path: ['data'],
+  });
 export type SendMediaInput = z.infer<typeof SendMediaSchema>;
 
 export const EditMessageSchema = z.object({

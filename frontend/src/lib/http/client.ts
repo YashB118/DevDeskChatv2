@@ -42,8 +42,11 @@ apiClient.interceptors.response.use(
       try {
         await refreshAccessToken();
         return await apiClient(config);
-      } catch {
-        throw AppApiError.fromAxios(error);
+      } catch (retryErr) {
+        // Surface the retry's failure (which may be a different status code,
+        // a network error, or a refresh rejection) rather than the original
+        // 401 — otherwise downstream callers see a misleading "unauthorized".
+        throw AppApiError.fromAxios(retryErr instanceof AxiosError ? retryErr : error);
       }
     }
 

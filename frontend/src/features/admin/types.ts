@@ -10,6 +10,7 @@ export const AdminUserDTOSchema = z.object({
   role: UserRoleSchema,
   disabled: z.boolean().default(false),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
 });
 export type AdminUserDTO = z.infer<typeof AdminUserDTOSchema>;
 
@@ -18,17 +19,34 @@ export const AdminUserListSchema = z.object({
 });
 export type AdminUserList = z.infer<typeof AdminUserListSchema>;
 
+export const AdminUserEnvelopeSchema = z.object({
+  user: AdminUserDTOSchema,
+});
+
 export const CreateUserInputSchema = z.object({
-  email: z.string().email('Enter a valid email'),
-  displayName: z.string().min(1, 'Required'),
-  password: z.string().min(8, 'At least 8 characters'),
+  email: z.string().email('Enter a valid email').max(254),
+  displayName: z.string().min(1, 'Required').max(120),
+  password: z.string().min(8, 'At least 8 characters').max(128),
   role: UserRoleSchema,
 });
 export type CreateUserInput = z.infer<typeof CreateUserInputSchema>;
 
-export const UpdateUserInputSchema = z.object({
-  displayName: z.string().min(1).optional(),
-  role: UserRoleSchema.optional(),
-  disabled: z.boolean().optional(),
-});
+/**
+ * Backend `UpdateUserSchema` only accepts `displayName` and `role` and requires
+ * at least one of them — the disabled flag flips via dedicated endpoints, not
+ * a PATCH.
+ */
+export const UpdateUserInputSchema = z
+  .object({
+    displayName: z.string().min(1).max(120).optional(),
+    role: UserRoleSchema.optional(),
+  })
+  .refine((v) => v.displayName !== undefined || v.role !== undefined, {
+    message: 'Provide displayName or role',
+  });
 export type UpdateUserInput = z.infer<typeof UpdateUserInputSchema>;
+
+export const ResetPasswordInputSchema = z.object({
+  newPassword: z.string().min(8).max(128),
+});
+export type ResetPasswordInput = z.infer<typeof ResetPasswordInputSchema>;

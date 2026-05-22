@@ -6,11 +6,10 @@ import type { FeedbackDTO, FeedbackList } from '../types';
 function item(over: Partial<FeedbackDTO> = {}): FeedbackDTO {
   return {
     id: 'f-1',
-    authorId: 'u-1',
-    authorName: 'Yash',
-    message: 'great',
-    ts: 1000,
+    userId: 'u-1',
+    body: 'great',
     read: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
     ...over,
   };
 }

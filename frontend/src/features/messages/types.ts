@@ -11,7 +11,7 @@ export const MessageTypeSchema = z.enum([
 ]);
 export type MessageType = z.infer<typeof MessageTypeSchema>;
 
-export const AckStateSchema = z.enum(['SENT', 'DELIVERED', 'READ', 'PLAYED']);
+export const AckStateSchema = z.enum(['SENT', 'DELIVERED', 'READ', 'PLAYED', 'FAILED']);
 export type AckState = z.infer<typeof AckStateSchema>;
 
 export const ReactionSchema = z.object({
@@ -32,6 +32,8 @@ export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
 export const MessageDTOSchema = z.object({
   id: z.string().min(1),
+  /** WhatsApp wire id — required for edit/delete/react/forward URL params. */
+  stanzaId: z.string().min(1),
   chatId: z.string().min(1),
   senderId: z.string().min(1),
   senderName: z.string().optional(),
@@ -72,3 +74,52 @@ export interface SendMessageInput {
   quoted?: QuotedRef | null;
   mentions?: readonly string[];
 }
+
+/** Backend `POST /api/messages/:chatId/send` response. */
+export interface SendMessageResponse {
+  id: string;
+  stanzaId: string;
+}
+
+// ----- Backend wire shapes (for the API-layer adapter) -----
+
+const BackendReactionSchema = z.object({
+  senderJid: z.string(),
+  emoji: z.string(),
+  createdAt: z.string(),
+});
+
+const BackendEditSchema = z.object({
+  previousBody: z.string().nullable(),
+  newBody: z.string().nullable(),
+  editedAt: z.string(),
+});
+
+const BackendQuoteSchema = z
+  .object({
+    quotedStanzaId: z.string(),
+    quotedBody: z.string().nullable(),
+  })
+  .nullable();
+
+export const BackendMessageResponseSchema = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  stanzaId: z.string(),
+  fromJid: z.string(),
+  fromMe: z.boolean(),
+  body: z.string().nullable(),
+  type: z.string(),
+  sentAt: z.string(),
+  rowId: z.number().int().nullable(),
+  deleted: z.boolean(),
+  reactions: z.array(BackendReactionSchema),
+  mentions: z.array(z.string()),
+  edits: z.array(BackendEditSchema),
+  quote: BackendQuoteSchema,
+});
+export type BackendMessageResponse = z.infer<typeof BackendMessageResponseSchema>;
+
+export const BackendMessageListResponseSchema = z.object({
+  messages: z.array(BackendMessageResponseSchema),
+});

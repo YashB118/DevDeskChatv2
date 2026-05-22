@@ -160,11 +160,17 @@ export class AuthController {
   }
 
   private clearRefreshCookie(res: Response): void {
-    res.clearCookie(this.config.REFRESH_COOKIE_NAME, {
+    // clearCookie must mirror the attributes used to set the cookie or the
+    // browser refuses to remove it. Reuse the same options minus `expires`.
+    const opts: CookieOptions = {
+      httpOnly: true,
+      secure: this.config.REFRESH_COOKIE_SECURE,
+      sameSite: 'strict',
       path: this.config.REFRESH_COOKIE_PATH,
-      ...(this.config.REFRESH_COOKIE_DOMAIN !== undefined
-        ? { domain: this.config.REFRESH_COOKIE_DOMAIN }
-        : {}),
-    });
+    };
+    if (this.config.REFRESH_COOKIE_DOMAIN !== undefined) {
+      opts.domain = this.config.REFRESH_COOKIE_DOMAIN;
+    }
+    res.clearCookie(this.config.REFRESH_COOKIE_NAME, opts);
   }
 }

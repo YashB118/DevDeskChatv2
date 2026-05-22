@@ -4,6 +4,7 @@ import { WahaService } from '@app/integrations/waha/waha.service';
 import { CacheService } from '@app/infra/cache/cache.service';
 import { MuteService } from '@app/modules/mute/mute.service';
 import { type UserDomain } from '@app/modules/users/user.types';
+import { SocketEmitter } from '@app/realtime/socket.emitter';
 import { ChatMetadataRepository } from './chat-metadata.repository';
 import { ChatPolicy } from './chat.policy';
 import { type ListChatsQuery } from './chat.schema';
@@ -63,6 +64,7 @@ export class ChatsService {
     private readonly cache: CacheService,
     private readonly policy: ChatPolicy,
     private readonly mute: MuteService,
+    private readonly emitter: SocketEmitter,
   ) {}
 
   async list(user: UserDomain, query: ListChatsQuery): Promise<EnrichedChat[]> {
@@ -96,12 +98,27 @@ export class ChatsService {
     await this.metadata.setLastSeen(chatId, new Date());
     // Invalidate cache so the unread count refreshes on next list call.
     await this.invalidateUserCache(user.id);
+    // Tell the user's other sessions to clear their unread badge.
+    this.emitter.toUser(user.id, 'chat:read', { chatId, by: user.id });
   }
 
   async sync(user: UserDomain, session: string): Promise<EnrichedChat[]> {
     await this.invalidateUserCache(user.id);
     this.waha.invalidateChats(session);
     return this.list(user, { session, limit: 50, offset: 0 });
+  }
+
+  /**
+   * Backing for `GET /api/chats/:chatId/participants`. Authorisation gates the
+   * caller via the chat policy; the data side is a stub until the WAHA client
+   * exposes group membership.
+   */
+  async listParticipants(
+    user: UserDomain,
+    chatId: string,
+  ): Promise<{ id: string; name: string }[]> {
+    await this.policy.assertCanRead(user, chatId);
+    return [];
   }
 
   private async enrich(
@@ -151,11 +168,10 @@ export class ChatsService {
   }
 
   private async invalidateUserCache(userId: string): Promise<void> {
-    // Keyspace `chats:list:<user>:*` — the existing CacheService has no SCAN
-    // helper, so the simplest correct thing is to drop the known prefixes the
-    // UI uses. We delete the default-page key explicitly and rely on the 10s
-    // TTL to flush long-tail pages quickly.
-    await this.cache.del(`chats:list:${userId}:default:50:0`);
+    // Drop every cached page for this user. SCAN-based prefix delete covers
+    // the (session, limit, offset) cartesian without us having to track every
+    // variant the UI may have requested.
+    await this.cache.delByPrefix(`chats:list:${userId}:`);
   }
 }
 

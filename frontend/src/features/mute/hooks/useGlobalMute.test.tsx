@@ -21,9 +21,9 @@ describe('useGlobalMute', () => {
   it('optimistically flips then rolls back on failure', async () => {
     server.use(
       http.get(`${env.VITE_API_BASE_URL}/api/mute/global`, () =>
-        HttpResponse.json({ muted: false }),
+        HttpResponse.json({ enabled: false }),
       ),
-      http.patch(`${env.VITE_API_BASE_URL}/api/mute/global`, () =>
+      http.post(`${env.VITE_API_BASE_URL}/api/mute/global`, () =>
         HttpResponse.json({ error: { code: 'ERR' } }, { status: 500 }),
       ),
     );
@@ -35,11 +35,11 @@ describe('useGlobalMute', () => {
     const actions = renderHook(() => useGlobalMuteActions(), { wrapper: wrapper(qc) });
 
     await waitFor(() => {
-      expect(get.result.current.data?.muted).toBe(false);
+      expect(get.result.current.data?.enabled).toBe(false);
     });
-    await expect(actions.result.current.setMuted(true)).rejects.toBeDefined();
+    await expect(actions.result.current.setEnabled(true)).rejects.toBeDefined();
     await waitFor(() => {
-      expect(get.result.current.data?.muted).toBe(false);
+      expect(get.result.current.data?.enabled).toBe(false);
     });
   });
 });

@@ -28,7 +28,10 @@ export class PendingMessageStore {
   }
 
   async add(stanzaId: string, ttlMs: number = this.ttlMs): Promise<void> {
-    await this.redis.set(this.key(stanzaId), '1', 'PX', ttlMs);
+    // ioredis throws on ttlMs <= 0. Clamp to a sane minimum so a misconfigured
+    // env or a caller pass-through can't crash the send path.
+    const safeTtl = ttlMs > 0 ? ttlMs : 1;
+    await this.redis.set(this.key(stanzaId), '1', 'PX', safeTtl);
   }
 
   async isPending(stanzaId: string): Promise<boolean> {

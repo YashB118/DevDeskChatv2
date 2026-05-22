@@ -9,6 +9,8 @@ export interface CircuitBreakerOptions {
   cooldownMs: number;
   errorCode?: string;
   now?: () => number;
+  /** Predicate to classify an error as a breaker failure. Default: all errors count. */
+  isFailure?: (err: unknown) => boolean;
 }
 
 /**
@@ -43,7 +45,9 @@ export class CircuitBreaker {
       this.onSuccess();
       return result;
     } catch (err) {
-      this.onFailure(err);
+      if (this.opts.isFailure === undefined || this.opts.isFailure(err)) {
+        this.onFailure(err);
+      }
       throw err;
     }
   }

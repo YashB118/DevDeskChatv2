@@ -7,16 +7,17 @@ import { useSendMessage } from '../../hooks/useMessageMutations';
 
 interface MessageComposerProps {
   chatId: ChatId;
+  session: string;
 }
 
-export function MessageComposer({ chatId }: MessageComposerProps): ReactElement {
+export function MessageComposer({ chatId, session }: MessageComposerProps): ReactElement {
   // Composer state is local to keep typing out of the global store and away
   // from the message list — the list never re-renders on keystrokes.
   const draft = useMessagesUIStore.getState().drafts[chatId] ?? '';
   const [value, setValue] = useState(draft);
   const setDraft = useMessagesUIStore((s) => s.setDraft);
   const clearDraft = useMessagesUIStore((s) => s.clearDraft);
-  const { send, isSending } = useSendMessage(chatId);
+  const { send, isSending } = useSendMessage(chatId, session);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {

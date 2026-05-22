@@ -57,8 +57,16 @@ export class FeedbackRepository {
   }
 
   async markRead(id: string, manager?: EntityManager): Promise<FeedbackDomain | null> {
+    return this.setRead(id, true, manager);
+  }
+
+  async setRead(
+    id: string,
+    read: boolean,
+    manager?: EntityManager,
+  ): Promise<FeedbackDomain | null> {
     const repo = this.scoped(manager);
-    await repo.update({ id }, { read: true });
+    await repo.update({ id }, { read });
     const row = await repo.findOne({ where: { id } });
     return row ? toDomain(row) : null;
   }

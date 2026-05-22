@@ -25,6 +25,7 @@ interface SocketProviderProps {
 export function SocketProvider({ children }: SocketProviderProps): ReactElement {
   const [socket, setSocket] = useState<AppSocket | null>(null);
   const socketRef = useRef<AppSocket | null>(null);
+  const teardownRef = useRef<(() => void) | null>(null);
   const { setStatus, setAttempt, reset } = useConnectionStatusStore.getState();
 
   useEffect(() => {
@@ -65,12 +66,25 @@ export function SocketProvider({ children }: SocketProviderProps): ReactElement 
       s.io.on('reconnect', onReconnect);
       s.io.on('reconnect_failed', onReconnectFailed);
 
+      // Track each listener individually so logout → login cycles don't
+      // accumulate stale handlers on the shared manager.
+      teardownRef.current = () => {
+        s.off('connect', onConnect);
+        s.off('disconnect', onDisconnect);
+        s.off('connect_error', onConnectError);
+        s.io.off('reconnect_attempt', onReconnectAttempt);
+        s.io.off('reconnect', onReconnect);
+        s.io.off('reconnect_failed', onReconnectFailed);
+      };
+
       setStatus('connecting', null);
       s.connect();
       setSocket(s);
     }
 
     function close(): void {
+      teardownRef.current?.();
+      teardownRef.current = null;
       setSocket(null);
       socketRef.current = null;
       disposeSocket();

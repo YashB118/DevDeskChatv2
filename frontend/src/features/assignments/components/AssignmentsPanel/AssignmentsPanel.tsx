@@ -63,49 +63,56 @@ export function AssignmentsPanel(): ReactElement {
           endReached={() => {
             if (hasNextPage && !isFetchingNextPage) fetchNextPage();
           }}
-          itemContent={(_, a) => (
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] p-3">
-              <div className="flex flex-col">
-                <span className="font-medium">{a.chatTitle}</span>
-                <span className="text-[length:var(--text-sm)] text-[var(--color-fg-muted)]">
-                  {a.assignedToName ?? 'Unassigned'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  aria-label={`Assign ${a.chatTitle}`}
-                  className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border-default)] bg-[var(--color-bg-canvas)] px-2 text-[length:var(--text-sm)]"
-                  value={a.assignedTo ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === '') {
-                      void handle('Unassign', () => unassign(toChatId(a.chatId)));
-                    } else {
-                      void handle('Assign', () =>
-                        assign(toChatId(a.chatId), toUserId(v)),
-                      );
-                    }
-                  }}
-                >
-                  <option value="">Unassigned</option>
-                  {developers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.displayName}
-                    </option>
-                  ))}
-                </select>
-                {a.assignedTo && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void handle('Unassign', () => unassign(toChatId(a.chatId)))}
+          itemContent={(_, a) => {
+            const assignedToName =
+              a.assignedToName ??
+              developers.find((u) => u.id === a.userId)?.displayName ??
+              null;
+            const title = a.chatTitle ?? a.chatId;
+            return (
+              <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] p-3">
+                <div className="flex flex-col">
+                  <span className="font-medium">{title}</span>
+                  <span className="text-[length:var(--text-sm)] text-[var(--color-fg-muted)]">
+                    {a.isActive ? (assignedToName ?? 'Unassigned') : 'Unassigned'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    aria-label={`Assign ${title}`}
+                    className="h-9 rounded-[var(--radius-md)] border border-[var(--color-border-default)] bg-[var(--color-bg-canvas)] px-2 text-[length:var(--text-sm)]"
+                    value={a.isActive ? a.userId : ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === '') {
+                        void handle('Unassign', () => unassign(a.id, toChatId(a.chatId)));
+                      } else {
+                        void handle('Assign', () =>
+                          assign(toChatId(a.chatId), toUserId(v)),
+                        );
+                      }
+                    }}
                   >
-                    Unassign
-                  </Button>
-                )}
+                    <option value="">Unassigned</option>
+                    {developers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  {a.isActive && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void handle('Unassign', () => unassign(a.id, toChatId(a.chatId)))}
+                    >
+                      Unassign
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          }}
           components={{
             Footer: () =>
               isFetchingNextPage ? (
